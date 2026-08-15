@@ -210,7 +210,6 @@ def extract_combatant(character_id: int, data: dict) -> Combatant:
         if rname:
             race = f"{rname} "
 
-    ability_names = ABILITY_NAMES
     stat_values = {}
     if isinstance(stats, list) and stats and isinstance(stats[0], dict):
         for stat in stats:
@@ -218,10 +217,7 @@ def extract_combatant(character_id: int, data: dict) -> Combatant:
     elif isinstance(stats, list) and stats and isinstance(stats[0], int):
         for i, value in enumerate(stats[:6]):
             stat_values[i + 1] = int(value)
-    stats_text = ", ".join(
-        f"{ability_names[i]} {stat_values.get(i + 1, '?')}" for i in range(6)
-    )
-    note = f"{race}{role} — {stats_text}. Imported from D&D Beyond."
+    note = f"{race}{role}. Imported from D&D Beyond."
 
     def _stat_mod(aid: int) -> int:
         return (int(stat_values.get(aid, 10)) - 10) // 2

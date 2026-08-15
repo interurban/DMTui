@@ -490,11 +490,12 @@ async def main() -> None:
         assert set(camps["campaigns"]["Test Party"]["character_ids"]) == set(DEFAULT_IDS + [9876543])
 
         # load the saved campaign back (active campaign is the first menu option)
-        await pilot.press("shift+c")
+        await pilot.press("C")
         await _wait_modal(pilot, ListModal)
         await pilot.press("enter")      # -> load: Test Party
         await _wait_pcs(pilot, 4)
-        assert [c.name for c in app.combatants if c.kind == "PC"] == ["Zephyr", "Lyra", "Tess", "Nix"]
+        # Lyra was sorted first (init 30) when the party was saved, so she leads
+        assert [c.name for c in app.combatants if c.kind == "PC"] == ["Lyra", "Zephyr", "Tess", "Nix"]
         app.save_screenshot(os.path.join(SHOTS, "32-campaign-loaded.png"))
 
         # with everyone dead, advancing must still begin a new round — the
@@ -507,10 +508,6 @@ async def main() -> None:
         await pilot.press("n")
         await pilot.pause()
         assert app.round == r0 + 1, (app.round, r0)
-        app.combatants = []
-        app._turn = app._sel = None
-        app._moving = False
-        app._rebuild_rows()
 
         # new blank encounter (ctrl+n -> confirm), then undo/redo it
         await pilot.press("ctrl+n")

@@ -3,6 +3,19 @@
 Sprint log for the Battle Tracker — a single-screen terminal combat tracker
 for D&D 5e DMs (Textual). Run: `.venv/bin/python app.py`.
 
+## Detail card note + smoke suite fixes (complete)
+
+- The DDB import note no longer re-lists ability scores — the detail card
+  already shows them; it now reads "Wood Elf Ranger 7. Imported from
+  D&D Beyond."
+- The campaign smoke scenario had never run green. Three fixes: the second
+  campaign-menu open pressed `shift+c`, which never matched `Binding("C")`
+  (now presses `"C"`); the load-order assertion ignored that a save preserves
+  party order (Lyra leads after her init-30 sort); and a manual combatant
+  wipe before `ctrl+n` skipped the confirm modal and broke the undo/redo
+  assertions that followed.
+- 51 unit tests + full smoke pass.
+
 ## Second review fix pass (complete)
 
 A second comprehensive review by two fresh staff developers (engine + parser,

@@ -355,7 +355,8 @@ def test_extract_combatant_realistic():
     assert c.attacks[0].startswith("Battleaxe +5 · 1d8+3"), c.attacks
     assert c.spells == ["Booming Blade"]
     assert any("racial traits" in t for t in c.traits) and "Second Wind" in c.traits
-    assert "Fighter 3" in c.note and "STR 16" in c.note
+    assert "Fighter 3" in c.note and "Imported from D&D Beyond" in c.note
+    assert "STR" not in c.note
 
 
 def test_extract_combatant_sparse():
