@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import random
 import re
+from copy import deepcopy
 from dataclasses import dataclass, field
 
 # ---------------------------------------------------------------------------
@@ -70,6 +71,8 @@ class Combatant:
 
     @property
     def hp_frac(self) -> float:
+        if self.max_hp <= 0:
+            return 0.0
         return max(0.0, min(1.0, self.hp / self.max_hp))
 
     def stat(self, aid: int) -> int | None:
@@ -97,6 +100,8 @@ MAP_ROWS = 20
 
 def short_label(name: str) -> str:
     """Compact token label: 'Goblin 2' -> 'G2', 'Syrva' -> 'Syr', 'Ogre' -> 'Ogr'."""
+    if not name:
+        return "?"
     m = re.search(r"\s+(\d+)$", name)
     if m:
         base = name[: m.start()].strip()
@@ -112,6 +117,10 @@ _ATK_RE = re.compile(
     r"^(?P<name>.*?)\s*(?P<bonus>[+-]\d+)\s*·\s*(?P<dice>\d*d\d+(?:[+-]\d+)?)\s*(?P<dtype>\w+)?$"
 )
 _DICE_RE = re.compile(r"\d*d\d+(?:[+-]\d+)?")
+_HEAL_RE = re.compile(r"\b(heal|heals|cure|cures|restore|restores|mend|regain|hit points|hp)\b", re.IGNORECASE)
+_SAVE_RE = re.compile(r"\(([a-z]+)\s+dc\s*(\d+)\)", re.IGNORECASE)
+_DARTS_RE = re.compile(r"(\d+)\s*(?:darts?|×|times?)\b", re.IGNORECASE)
+_SAVE_ABILITY_ID = {"str": 1, "dex": 2, "con": 3, "int": 4, "wis": 5, "cha": 6}
 
 
 def roll_dice(spec: str, rng=random) -> tuple[int, list[int], int]:
@@ -133,7 +142,10 @@ def resolve_attack(attacker: Combatant, action: str, target: Combatant, rng=rand
 
     Weapon lines look like 'Longsword +7 · 1d8+4 sl' and roll d20+bonus vs the
     target's AC (nat 20 crits and doubles the damage dice, nat 1 always misses).
-    Spells are best-effort: the first dice expression found is rolled as damage.
+    Spells are best-effort: the first dice expression found is rolled as damage,
+    a '(Dex DC 12)' hint grants the target a saving throw (half damage on a
+    success), heal/cure/regain spells restore HP instead of dealing damage, and
+    'N darts' lines (Magic Missile) roll the dice expression N times.
     Returns a plain dict describing the outcome for the caller to log/apply.
     """
     m = _ATK_RE.match(action)
@@ -150,7 +162,9 @@ def resolve_attack(attacker: Combatant, action: str, target: Combatant, rng=rand
         if hit:
             total, rolls, dmg_bonus = roll_dice(dice, rng)
             if crit:
-                extra, extra_rolls, _ = roll_dice(dice, rng)
+                # doubling the dice means rolling them again — the flat +N
+                # bonus is added once, not twice
+                extra, extra_rolls, _ = roll_dice(dice.replace(f"{dmg_bonus:+d}", ""), rng)
                 total += extra
                 rolls = rolls + extra_rolls
         else:
@@ -163,25 +177,56 @@ def resolve_attack(attacker: Combatant, action: str, target: Combatant, rng=rand
     dm = _DICE_RE.search(action)
     if dm is not None:
         total, rolls, dmg_bonus = roll_dice(dm.group(0), rng)
+        healing = bool(_HEAL_RE.search(action))
+        darts_m = _DARTS_RE.search(action)
+        if darts_m and not healing:
+            for _ in range(int(darts_m.group(1)) - 1):
+                extra, extra_rolls, _ = roll_dice(dm.group(0), rng)
+                total += extra
+                rolls = rolls + extra_rolls
+        save_m = _SAVE_RE.search(action)
+        if save_m is not None:
+            ability = save_m.group(1).lower()
+            aid = _SAVE_ABILITY_ID.get(ability)
+            dc = int(save_m.group(2))
+            save_mod = target.save(aid) if aid is not None else None
+            save_roll = rng.randint(1, 20) + (save_mod if save_mod is not None else 0)
+            saved = save_roll >= dc
+            if saved:
+                total = max(0, total // 2)
+            return {
+                "kind": "spell", "name": action, "hit": True, "crit": False,
+                "damage": total, "dice": rolls, "dice_bonus": dmg_bonus, "heal": healing,
+                "save": {"ability": ability, "dc": dc, "roll": save_roll, "saved": saved},
+            }
         return {"kind": "spell", "name": action, "hit": True, "crit": False,
-                "damage": total, "dice": rolls, "dice_bonus": dmg_bonus}
+                "damage": total, "dice": rolls, "dice_bonus": dmg_bonus, "heal": healing}
     return {"kind": "spell", "name": action, "hit": True, "crit": False,
-            "damage": 0, "dice": [], "dice_bonus": 0}
+            "damage": 0, "dice": [], "dice_bonus": 0, "heal": False}
 
 
 def coord_name(x: int, y: int) -> str:
-    """Grid coordinate label, e.g. (13, 7) -> 'N8'."""
-    return f"{chr(ord('A') + x)}{y + 1}"
+    """Grid coordinate label, e.g. (13, 7) -> 'N8'. Columns past 'Z' continue
+    Excel-style: (26, 0) -> 'AA1'."""
+    x = int(x)
+    label = ""
+    while True:
+        label = chr(ord("A") + x % 26) + label
+        x = x // 26 - 1
+        if x < 0:
+            break
+    return f"{label}{y + 1}"
 
 
-def find_free_spot(combatants: list[Combatant], cols: int = MAP_COLS, rows: int = MAP_ROWS) -> tuple[int, int]:
-    """Pick the first empty cell, scanning from the top-right inward."""
+def find_free_spot(combatants: list[Combatant], cols: int = MAP_COLS, rows: int = MAP_ROWS) -> tuple[int, int] | None:
+    """Pick the first empty cell, scanning from the top-right inward. Returns
+    None when the map is completely full."""
     occupied = {(c.x, c.y) for c in combatants}
     for y in range(rows):
         for x in range(cols - 1, -1, -1):
             if (x, y) not in occupied:
                 return x, y
-    return 0, 0
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -398,19 +443,30 @@ def encounter_monster(template: str, name: str, **over) -> Combatant:
     """Build an encounter monster from a template, overriding hp/conditions/note/etc."""
     t = MONSTERS[template]
     hp = over.pop("hp", t["max_hp"])
-    return Combatant(
+    base = dict(
         name=name, kind="monster",
         hp=hp, max_hp=t["max_hp"], ac=t["ac"],
         init=None, init_mod=t["init"],
-        role=t["role"], note=over.pop("note", t["note"]),
+        role=t["role"], note=t["note"],
         stats=dict(t["stats"]), saves=set(t["saves"]),
         speed=t["speed"], proficiency=t["proficiency"],
         skills=dict(t["skills"]), passive_perception=t["passive_perception"],
         attacks=list(t["attacks"]), traits=list(t["traits"]),
         spells=list(t.get("spells", [])),
-        conditions=set(over.pop("conditions", [])),
-        **over,
     )
+    base.update(over)
+    if isinstance(base.get("conditions"), (list, set)):
+        base["conditions"] = set(base["conditions"])
+    if isinstance(base.get("stats"), dict):
+        base["stats"] = dict(base["stats"])
+    if isinstance(base.get("skills"), dict):
+        base["skills"] = dict(base["skills"])
+    if isinstance(base.get("saves"), (list, set)):
+        base["saves"] = set(base["saves"])
+    for key in ("attacks", "traits", "spells"):
+        if isinstance(base.get(key), list):
+            base[key] = list(base[key])
+    return Combatant(**base)
 
 
 ENCOUNTER_MONSTERS = [
@@ -441,10 +497,17 @@ START_POSITIONS: dict[str, tuple[int, int]] = {
 
 
 def build_encounter() -> list[Combatant]:
-    """Return the starting encounter in encounter order (initiative is blank)."""
-    combatants = PARTY + ENCOUNTER_MONSTERS
+    """Return the starting encounter in encounter order (initiative is blank).
+
+    PARTY / ENCOUNTER_MONSTERS are shared module-level singletons, so every
+    call clones them — otherwise 'reset' would hand back the same objects the
+    player has been damaging (regression from the code-review pass)."""
+    combatants = [deepcopy(c) for c in (PARTY + ENCOUNTER_MONSTERS)]
     for c in combatants:
-        c.x, c.y = START_POSITIONS.get(c.name, find_free_spot(combatants))
+        spot = START_POSITIONS.get(c.name) or find_free_spot(combatants)
+        if spot is None:
+            spot = (0, 0)
+        c.x, c.y = spot
     return combatants
 
 

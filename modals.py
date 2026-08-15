@@ -185,3 +185,13 @@ class HelpModal(ModalScreen[None]):
 
     def action_cancel(self) -> None:
         self.dismiss(None)
+
+
+class ImportingModal(ModalScreen[None]):
+    """Shown while a D&D Beyond fetch is in flight so keystrokes don't leak
+    through into the live encounter (the fetch runs on a background thread)."""
+
+    def compose(self) -> ComposeResult:
+        with Container(classes="modal-box"):
+            yield Static("[bold #a8d0ff]Importing character…[/]", classes="modal-title")
+            yield Static("[dim]Contacting D&D Beyond — one moment.[/]", classes="modal-hint")

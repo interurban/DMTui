@@ -86,6 +86,10 @@ def fetch_character_data(character_id: int) -> dict:
         except Exception:
             message = str(exc)
         raise ValueError(f"D&D Beyond returned {exc.code}: {message}") from exc
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise ValueError(f"Could not reach D&D Beyond: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("D&D Beyond returned an unexpected response")
     data = payload.get("data") or {}
     if data.get("character") is None and not payload.get("success", True):
         raise ValueError(payload.get("message", "character not found"))
@@ -121,7 +125,8 @@ def extract_combatant(character_id: int, data: dict) -> Combatant:
     dex_mod = con_mod = 0
     stats = character.get("stats")
     if isinstance(stats, dict):
-        stats = list(stats.values())
+        # dict form may arrive with string keys in any order — sort by id
+        stats = [stats[k] for k in sorted(stats, key=_int)]
     if isinstance(stats, list) and stats and isinstance(stats[0], dict):
         for stat in stats:
             s_id = _int(stat.get("id"))
@@ -145,7 +150,7 @@ def extract_combatant(character_id: int, data: dict) -> Combatant:
         max_hp = base + bonus + con_mod * total_level
         if max_hp <= 0:
             max_hp = 10 + total_level * 5
-    current = max(0, max_hp - _int(character.get("removedHitPoints")))
+    current = max(0, min(max_hp, max_hp - _int(character.get("removedHitPoints"))))
 
     # armor class: armor base + dex (capped by armor type) + shield + AC bonuses
     ac = 10
@@ -160,7 +165,7 @@ def extract_combatant(character_id: int, data: dict) -> Combatant:
         if not isinstance(defn, dict):
             continue
         item_ac = defn.get("armorClass")
-        atype = defn.get("armorTypeId")
+        atype = _int(defn.get("armorTypeId"), -1)
         if atype in (1, 2, 3) and item_ac:
             ac = _int(item_ac)
             dex_cap = {1: None, 2: 2, 3: 0}[atype]
@@ -172,7 +177,7 @@ def extract_combatant(character_id: int, data: dict) -> Combatant:
         if not isinstance(defn, dict):
             continue
         item_ac = defn.get("armorClass")
-        atype = defn.get("armorTypeId")
+        atype = _int(defn.get("armorTypeId"), -1)
         iname = (defn.get("name") or "").lower()
         if (atype == 4 or "shield" in iname) and item_ac:
             shield_bonus += _int(item_ac)
@@ -252,7 +257,7 @@ def extract_combatant(character_id: int, data: dict) -> Combatant:
 
     hd = character.get("hitPointDice")
     if isinstance(hd, dict):
-        hd = "".join(f"{v}d{k}" for k, v in hd.items())
+        hd = ", ".join(f"{v}d{k}" for k, v in sorted(hd.items(), key=_int))
     hit_dice = hd if isinstance(hd, str) else ""
 
     attacks: list[str] = []
@@ -276,8 +281,10 @@ def extract_combatant(character_id: int, data: dict) -> Combatant:
         stat_mod = dex_mod if defn.get("range") else str_mod
         dmg_bonus = _int(defn.get("damageBonus"))
         dtype = str(defn.get("damageType") or "")
+        # when DDB reports an explicit attack bonus (magic weapons etc.) trust it
+        to_hit = _int(defn.get("attackBonus"), stat_mod + prof + dmg_bonus)
         attacks.append(
-            f"{(defn.get('name') or '?')} +{stat_mod + prof + dmg_bonus} · {dmg}{stat_mod + dmg_bonus:+d} {dtype[:3].lower()}"
+            f"{(defn.get('name') or '?')} +{to_hit} · {dmg}{stat_mod + dmg_bonus:+d} {dtype[:3].lower()}"
         )
 
     traits: list[str] = []
@@ -295,8 +302,9 @@ def extract_combatant(character_id: int, data: dict) -> Combatant:
         else:
             spell_items.append(item)
     for spell in spell_items[:8]:
-        if isinstance(spell, dict) and spell.get("definition", {}).get("name"):
-            spells.append(spell["definition"]["name"])
+        defn = spell.get("definition") if isinstance(spell, dict) else None
+        if isinstance(defn, dict) and defn.get("name"):
+            spells.append(defn["name"])
 
     return Combatant(
         name=name,

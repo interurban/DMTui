@@ -1,5 +1,9 @@
 """Unit tests for the pure battle logic. Run: .venv/bin/python tests.py"""
 
+import urllib.error
+import urllib.request
+from unittest import mock
+
 from battle import (
     Combatant,
     coord_name,
@@ -8,7 +12,7 @@ from battle import (
     roll_dice,
     short_label,
 )
-from ddb import extract_combatant, parse_ddb_url
+from ddb import extract_combatant, fetch_character_data, parse_ddb_url
 
 
 class Seq:
@@ -74,11 +78,12 @@ def test_resolve_miss():
 
 def test_resolve_crit():
     atk, tgt = dent(), hobgoblin()
-    # nat 20 always hits and doubles the damage dice (d8=3 then d8=5)
+    # nat 20 always hits and doubles the damage dice (d8=3 then d8=5); the
+    # flat +4 bonus is added ONCE (regression: it was added twice)
     res = resolve_attack(atk, "Longsword +7 · 1d8+4 sl", tgt, Seq([20, 3, 5]))
     assert res["hit"] and res["crit"]
-    assert res["damage"] == (3 + 4) + (5 + 4) == 16
-    assert res["dice"] == [3, 5]
+    assert res["damage"] == 3 + 5 + 4 == 12
+    assert res["dice"] == [3, 5] and res["dice_bonus"] == 4
 
 
 def test_resolve_nat_one_always_misses():
@@ -97,9 +102,33 @@ def test_resolve_crit_beats_any_ac():
 
 def test_resolve_spell_with_dice():
     atk, tgt = dent(), hobgoblin()
-    res = resolve_attack(atk, "Burning Hands — 15 ft. cone, 3d6 fire (Dex DC 12)", tgt, Seq([2, 4, 5]))
+    # d20=10 + DEX save (none, so +0) = 10 < DC 12 -> not saved, full damage
+    res = resolve_attack(atk, "Burning Hands — 15 ft. cone, 3d6 fire (Dex DC 12)", tgt, Seq([2, 4, 5, 10]))
     assert res["kind"] == "spell" and res["damage"] == 11
     assert res["dice"] == [2, 4, 5] and res["dice_bonus"] == 0
+    assert res["save"]["dc"] == 12 and res["save"]["saved"] is False
+
+
+def test_resolve_spell_save_half_damage():
+    atk, tgt = dent(), hobgoblin()
+    # d20=13 + 0 = 13 >= DC 12 -> saved, half damage (11 // 2 = 5)
+    res = resolve_attack(atk, "Burning Hands — 15 ft. cone, 3d6 fire (Dex DC 12)", tgt, Seq([2, 4, 5, 13]))
+    assert res["damage"] == 5 and res["save"]["saved"] is True
+
+
+def test_resolve_spell_heals():
+    atk, tgt = dent(), hobgoblin()
+    res = resolve_attack(atk, "Cure Wounds — 1d8+2 HP", tgt, Seq([5]))
+    assert res["kind"] == "spell" and res["heal"] is True
+    assert res["damage"] == 7
+
+
+def test_resolve_spell_magic_missile():
+    atk, tgt = dent(), hobgoblin()
+    # '3 darts' rolls 1d4+1 three times: (2, 3, 1) -> 3 + 4 + 2 = 9
+    res = resolve_attack(atk, "Magic Missile — 3 darts, 1d4+1 force each", tgt, Seq([2, 3, 1]))
+    assert res["kind"] == "spell" and res["damage"] == 9
+    assert res["dice"] == [2, 3, 1] and not res["heal"]
 
 
 def test_resolve_spell_without_dice():
@@ -113,11 +142,16 @@ def test_short_label():
     assert short_label("Syrva") == "Syr"
     assert short_label("Ogre") == "Ogr"
     assert short_label("Goblin Boss") == "Gob"
+    assert short_label("") == "?"
 
 
 def test_coord_name():
     assert coord_name(0, 0) == "A1"
     assert coord_name(13, 7) == "N8"
+    assert coord_name(26, 0) == "AA1"
+    assert coord_name(51, 3) == "AZ4"
+    assert coord_name(52, 0) == "BA1"
+    assert coord_name(0, 9) == "A10"
 
 
 def test_find_free_spot():
@@ -125,6 +159,36 @@ def test_find_free_spot():
     b = Combatant("B", "monster", hp=1, max_hp=1, ac=10, x=1, y=0)
     # scans top-right inward, so (3,0) is free first
     assert find_free_spot([a, b], cols=4, rows=2) == (3, 0)
+
+
+def test_find_free_spot_full_map_returns_none():
+    filled = [
+        Combatant(f"F{ix}", "monster", hp=1, max_hp=1, ac=10, x=x, y=y)
+        for ix, (y, x) in enumerate((y, x) for y in range(2) for x in range(3))
+    ]
+    assert find_free_spot(filled, cols=3, rows=2) is None
+
+
+def test_build_encounter_returns_fresh_clones():
+    """build_encounter must not hand back the shared module singletons —
+    mutating one call's result must not leak into the next (reset regression)."""
+    from battle import build_encounter
+
+    first = build_encounter()
+    first[0].hp = 1
+    first[0].conditions.add("stunned")
+    second = build_encounter()
+    assert first[0] is not second[0]
+    assert second[0].hp == 60 and "stunned" not in second[0].conditions
+    assert all(c.hp > 0 for c in second)
+
+
+def test_encounter_monster_override_known_keys():
+    from battle import encounter_monster
+
+    mob = encounter_monster("Goblin", "Bob", max_hp=99, ac=13, conditions={"prone"})
+    assert mob.max_hp == 99 and mob.ac == 13 and mob.conditions == {"prone"}
+    assert mob.name == "Bob" and mob.role == "Small humanoid"
 
 
 def test_parse_ddb_url():
@@ -244,6 +308,107 @@ def test_extract_combatant_weapon_without_attack_fields_skipped():
     }
     c = extract_combatant(2, data)
     assert c.attacks == []
+
+
+def test_extract_combatant_spell_without_definition():
+    data = {
+        "character": {
+            "name": "Sparrow",
+            "stats": {"1": 10, "2": 10, "3": 10, "4": 10, "5": 10, "6": 10},
+            "spells": {"0": [{"definition": None}, {"definition": {"name": "Cure Wounds"}}]},
+            "modifiers": {},
+        }
+    }
+    c = extract_combatant(3, data)
+    assert c.spells == ["Cure Wounds"]
+
+
+def test_extract_combatant_multi_hit_dice():
+    data = {
+        "character": {
+            "name": "Dicey",
+            "stats": {"1": 10, "2": 10, "3": 10, "4": 10, "5": 10, "6": 10},
+            "hitPointDice": {"8": 3, "6": 2},
+            "modifiers": {},
+        }
+    }
+    c = extract_combatant(4, data)
+    assert c.hit_dice == "3d8, 2d6"
+
+
+def test_extract_combatant_stats_dict_unordered():
+    data = {
+        "character": {
+            "name": "Muddled",
+            "stats": {"6": 8, "1": 15, "3": 12, "5": 10, "4": 10, "2": 14},
+            "baseHitPoints": 10,
+            "inventory": [],
+            "modifiers": {},
+        }
+    }
+    c = extract_combatant(5, data)
+    assert c.init_mod == 2 and c.stats[1] == 15 and c.stats[6] == 8
+    assert c.stats == {1: 15, 2: 14, 3: 12, 4: 10, 5: 10, 6: 8}
+
+
+def test_extract_combatant_armor_type_id_as_string():
+    data = {
+        "character": {
+            "name": "Bouncy",
+            "stats": {"1": 10, "2": 12, "3": 10, "4": 10, "5": 10, "6": 10},
+            "baseHitPoints": 10,
+            "inventory": [
+                {"equipped": True, "definition": {"name": "Shield", "armorClass": 2, "armorTypeId": "4"}},
+            ],
+            "modifiers": {},
+        }
+    }
+    c = extract_combatant(6, data)
+    assert c.ac == 10 + 1 + 2  # 10 + DEX + shield (armorTypeId came back as a string)
+
+
+def test_extract_combatant_attack_bonus_trusted():
+    data = {
+        "character": {
+            "name": "Vexed",
+            "stats": {"1": 10, "2": 10, "3": 10, "4": 10, "5": 10, "6": 10},
+            "baseHitPoints": 10,
+            "inventory": [
+                {"equipped": True, "definition": {
+                    "name": "Flame Tongue", "damage": {"diceString": "2d6"}, "damageType": "Fire",
+                    "attackBonus": 9,
+                }},
+            ],
+            "modifiers": {},
+        }
+    }
+    c = extract_combatant(7, data)
+    assert c.attacks[0].startswith("Flame Tongue +9 · 2d6"), c.attacks
+
+
+def test_extract_combatant_negative_removed_hp_clamped():
+    data = {
+        "character": {
+            "name": "Hearty",
+            "stats": {"1": 16, "2": 10, "3": 14, "4": 10, "5": 10, "6": 10},
+            "baseHitPoints": 10,
+            "removedHitPoints": -5,
+            "inventory": [],
+            "modifiers": {},
+        }
+    }
+    c = extract_combatant(8, data)
+    assert c.hp == c.max_hp  # a negative 'removed' value must not push hp above max
+
+
+def test_fetch_character_data_network_error_raises_value_error():
+    with mock.patch.object(urllib.request, "urlopen", side_effect=urllib.error.URLError("boom")):
+        try:
+            fetch_character_data(999999)
+        except ValueError as exc:
+            assert "reach" in str(exc)
+        else:
+            raise AssertionError("URLError should be wrapped in ValueError")
 
 
 def test_monster_templates_are_well_formed():

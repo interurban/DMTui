@@ -3,6 +3,34 @@
 Sprint log for the Battle Tracker — a single-screen terminal combat tracker
 for D&D 5e DMs (Textual). Run: `.venv/bin/python app.py`.
 
+## Review fix pass — comprehensive code review (complete)
+
+Two staff developers reviewed the whole codebase (engine + parser, and the
+TUI + smoke suite). Full findings and per-item rationale live in `REVIEW.md`.
+Everything below was fixed in this pass and locked in with regression tests
+(tests 19 → 32):
+
+- Combat engine: critical hits no longer double the flat damage bonus;
+  spell resolution handles save DCs (half damage on a save), heals
+  (Cure Wounds heals instead of hurting), and multi-dart lines (Magic Missile).
+- Reset actually resets: `build_encounter` clones the shared singletons per
+  call, so `r` no longer hands back the objects you were damaging.
+- Round counter advances when the dead-skip scan wraps past the current turn
+  (previously the turn could strand on a skipped creature / sole survivor).
+- Undo/redo revert combatant state without rewinding the turn or round.
+- Fixed a real crash: `s` referenced an undefined `SAVE_PATH` (the smoke test
+  monkeypatched it, hiding the bug).
+- Map no longer clips its bottom row (header + `MAP_ROWS` rows off-by-one).
+- Full map returns `None` instead of the occupied `(0,0)`; spawn/import/add
+  log a warning and skip. `coord_name` continues Excel-style past `Z`.
+- Heal/damage reject non-positive amounts and log the applied (clamped) delta.
+- Import shows a blocking modal while the fetch runs; DDB parsing hardened
+  (None spell definitions, unordered stats dicts, string armor ids, trusted
+  `attackBonus`, multi-die hit dice, clamped removed HP, wrapped network
+  errors).
+- Save/load validates structure; missing `stats` in a hand-edited save no
+  longer crashes the detail card; help is a plain sync action.
+
 ## Sprint F — Polish + monster library (complete)
 
 Finished off the tool:

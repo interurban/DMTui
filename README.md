@@ -16,7 +16,8 @@ python -m venv .venv
 .venv/bin/python app.py
 ```
 
-`?` opens the in-app key guide.
+`?` opens the in-app key guide. `CHANGELOG.md` is the sprint log; `REVIEW.md`
+documents the staff code review and every fix that came out of it.
 
 ## Keys
 
@@ -42,6 +43,14 @@ python -m venv .venv
 | `Ctrl+n` | new blank encounter |
 | `q` / `?` | quit / help |
 
+## Attacks & spells
+
+Weapon lines (`Longsword +7 · 1d8+4 sl`) roll `d20 + bonus` vs the target's AC;
+a natural 20 crits (dice doubled, the flat bonus once) and a natural 1 always
+misses. Spells are best-effort: `(Dex DC 12)` hints give the target a saving
+throw (half damage on a success), heal/cure/regain spells restore HP instead of
+dealing damage, and `3 darts` lines (Magic Missile) roll the dice three times.
+
 ## Dev
 
 ```sh
@@ -56,4 +65,6 @@ python -m venv .venv
   monster library, the starting encounter.
 - `ddb.py` — D&D Beyond character-service parsing (`extract_combatant`).
 - `widgets.py` — initiative row, token map, scroll containers.
-- `modals.py` — number/list/text prompts and the help screen.
+- `modals.py` — number/list/text prompts, the help screen, and the import
+  busy-modal.
+- `REVIEW.md` / `CHANGELOG.md` — staff review findings + fixes, sprint log.

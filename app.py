@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import random
 
 from textual.app import App, ComposeResult
@@ -40,8 +41,10 @@ from battle import (
 )
 import ddb
 from ddb import ABILITY_NAMES
-from modals import HelpModal, ListModal, MonsterBrowser, NumberModal, TextModal
+from modals import HelpModal, ImportingModal, ListModal, MonsterBrowser, NumberModal, TextModal
 from widgets import CombatantRow, InitiativeList, LEFT_W, LogView, MapGrid
+
+SAVE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "encounter.json")
 
 LOG_COLORS = {
     "info": "#c9d3e0",
@@ -275,7 +278,7 @@ class BattleApp(App[None]):
             self._undo.pop(0)
         self._redo.clear()
 
-    def _restore(self, snap: dict) -> None:
+    def _restore(self, snap: dict, keep_nav: bool = True) -> None:
         new_combatants = []
         for s in snap.get("combatants", []):
             s = dict(s)
@@ -284,15 +287,32 @@ class BattleApp(App[None]):
             c = Combatant(**s)
             c.conditions = set(s.get("conditions", []))
             c.saves = set(s.get("saves", []))
+            if not c.stats:
+                # backfill so a hand-edited save never yields a None mod (detail card crash)
+                c.stats = {i: 10 for i in range(1, 7)}
             new_combatants.append(c)
         self.combatants = new_combatants
-        self.round = int(snap.get("round", 1))
         n = len(new_combatants)
-        turn_i = snap.get("turn")
         sel_i = snap.get("sel")
-        self._turn = new_combatants[turn_i] if n and isinstance(turn_i, int) and 0 <= turn_i < n else None
-        self._sel = new_combatants[sel_i] if n and isinstance(sel_i, int) and 0 <= sel_i < n else (self._turn or (new_combatants[0] if n else None))
-        self._moving = False
+        self._sel = new_combatants[sel_i] if n and isinstance(sel_i, int) and 0 <= sel_i < n else None
+        if keep_nav:
+            # undo/redo revert combatant state, NOT navigation: keep the current
+            # round and re-map the current turn by name so we don't rewind time
+            cur_name = self._turn.name if self._turn is not None else None
+            self._turn = next(
+                (c for c in new_combatants if c.name == cur_name),
+                self._sel or (new_combatants[0] if n else None),
+            )
+            self._moving = bool(snap.get("moving", False))
+        else:
+            self.round = int(snap.get("round", 1))
+            turn_i = snap.get("turn")
+            self._turn = (
+                new_combatants[turn_i]
+                if n and isinstance(turn_i, int) and 0 <= turn_i < n
+                else self._sel or (new_combatants[0] if n else None)
+            )
+            self._moving = False
         self._rebuild_rows()
 
     def action_undo(self) -> None:
@@ -330,8 +350,15 @@ class BattleApp(App[None]):
         except (ValueError, TypeError) as exc:
             self._log(f"Save file corrupt: {exc}", kind="warn")
             return
-        self._push_undo()
-        self._restore(snap)
+        if not isinstance(snap, dict) or not isinstance(snap.get("combatants"), list):
+            self._log("Save file corrupt: expected an encounter snapshot.", kind="warn")
+            return
+        try:
+            self._push_undo()
+            self._restore(snap, keep_nav=False)
+        except (TypeError, ValueError, KeyError) as exc:
+            self._log(f"Save file corrupt: {exc}", kind="warn")
+            return
         self._log(f"Loaded encounter — {len(self.combatants)} creatures, round {self.round}.", kind="import")
 
     # -- rows & refresh ----------------------------------------------------
@@ -378,7 +405,9 @@ class BattleApp(App[None]):
         avail_w = max(1, grid.size.width - LEFT_W)
         cell_w = 4 if avail_w >= 20 else 3
         MAP_COLS = min(30, max(5, avail_w // cell_w))
-        MAP_ROWS = min(40, max(5, grid.size.height))
+        # the map renders a header line + MAP_ROWS data lines, so the grid must
+        # hold one more line than the row count (off-by-one: last row was clipped)
+        MAP_ROWS = min(40, max(5, grid.size.height - 1))
         grid.cell_w = cell_w
         grid.update(self._map_text(cell_w))
         self.query_one("#map-title", Static).update(self._map_title_text())
@@ -427,8 +456,11 @@ class BattleApp(App[None]):
                 lines.append("  ".join(parts))
 
         if c.saves:
-            sv = "  ".join(f"[bold]{ABILITY_NAMES[a - 1]}[/] {c.save(a):+d}" for a in sorted(c.saves))
-            lines.append(f"[bold]SAVES[/]  {sv}")
+            parts = []
+            for a in sorted(c.saves):
+                sv = c.save(a)
+                parts.append(f"[bold]{ABILITY_NAMES[a - 1]}[/] {sv:+d}" if sv is not None else f"[bold]{ABILITY_NAMES[a - 1]}[/] (—)")
+            lines.append(f"[bold]SAVES[/]  {'  '.join(parts)}")
         if c.skills:
             sk = "  ".join(f"[bold]{k.capitalize()}[/] {v:+d}" for k, v in sorted(c.skills.items()))
             lines.append(f"[bold]SKILLS[/]  {sk}")
@@ -638,12 +670,14 @@ class BattleApp(App[None]):
             self._turn = self.combatants[0]
         start = self.combatants.index(self._turn)
         nxt = (start + 1) % n
-        if nxt == 0:
-            self.round += 1
         scanned = 0
         while scanned < n and not self.combatants[nxt].alive:
             nxt = (nxt + 1) % n
             scanned += 1
+        # if every living creature was skipped we've wrapped around the order,
+        # including past the current turn — that begins a new round
+        if nxt <= start:
+            self.round += 1
         self._turn = self.combatants[nxt]
         self._log(f"Turn → {self._turn.name} (round {self.round})", kind="turn")
         self._refresh_all()
@@ -718,6 +752,9 @@ class BattleApp(App[None]):
         amount = await self.push_screen(self._make_number_modal(title, target), wait_for_dismiss=True)
         if amount is None:
             return
+        if amount <= 0:
+            self._log(f"{title} amount must be a positive number.", kind="warn")
+            return
         if title == "Heal":
             self._apply_hp(target, amount)
         else:
@@ -726,17 +763,23 @@ class BattleApp(App[None]):
     def _apply_hp(self, c: Combatant, delta: int) -> None:
         if delta == 0:
             return
-        self._push_undo()
         was_alive = c.alive
-        c.hp = max(0, min(c.max_hp, c.hp + delta))
+        before = c.hp
+        new_hp = max(0, min(c.max_hp, c.hp + delta))
+        applied = new_hp - before
+        if applied == 0:
+            self._log(f"{c.name} is already at max HP.", kind="heal")
+            return
+        self._push_undo()
+        c.hp = new_hp
         if delta > 0:
-            line = self._rng.choice(HEAL_LINES).format(name=c.name, amount=delta)
+            line = self._rng.choice(HEAL_LINES).format(name=c.name, amount=applied)
             kind = "heal"
         elif was_alive and not c.alive:
             line = self._rng.choice(DEATH_LINES).format(name=c.name)
             kind = "death"
         else:
-            line = self._rng.choice(DAMAGE_LINES).format(name=c.name, amount=-delta)
+            line = self._rng.choice(DAMAGE_LINES).format(name=c.name, amount=-applied)
             kind = "damage"
         if not c.alive and c.conditions:
             c.conditions.discard("concentrating")
@@ -795,18 +838,33 @@ class BattleApp(App[None]):
             if res["dice_bonus"]:
                 parts += f" {res['dice_bonus']:+d}"
             if res["damage"]:
-                self._log(
-                    f"{c.name} casts {res['name']} — [bold #e0c04c]{res['damage']} damage[/] to {target.name} ({parts}).",
-                    kind="monster",
-                )
+                if res.get("heal", False):
+                    self._log(
+                        f"{c.name} casts {res['name']} on {target.name} — "
+                        f"[bold #3fae6a]{res['damage']} HP restored[/] ({parts}).",
+                        kind="heal",
+                    )
+                else:
+                    save_note = ""
+                    if res.get("save"):
+                        s = res["save"]
+                        save_note = " [dim]saved[/]" if s["saved"] else f" [dim]failed ({s['roll']} vs DC {s['dc']})[/]"
+                    self._log(
+                        f"{c.name} casts {res['name']} — [bold #e0c04c]{res['damage']} damage[/] "
+                        f"to {target.name} ({parts}).{save_note}",
+                        kind="monster",
+                    )
             else:
                 self._log(f"{c.name} casts {res['name']} on {target.name}.", kind="monster")
         if res["damage"]:
             was_alive = target.alive
-            target.hp = max(0, min(target.max_hp, target.hp - res["damage"]))
-            if was_alive and not target.alive:
-                target.conditions.discard("concentrating")
-                self._log(self._rng.choice(DEATH_LINES).format(name=target.name), kind="death")
+            if res.get("heal", False):
+                target.hp = min(target.max_hp, target.hp + res["damage"])
+            else:
+                target.hp = max(0, min(target.max_hp, target.hp - res["damage"]))
+                if was_alive and not target.alive:
+                    target.conditions.discard("concentrating")
+                    self._log(self._rng.choice(DEATH_LINES).format(name=target.name), kind="death")
         self._refresh_all()
 
     # -- find a combatant --------------------------------------------------------
@@ -866,11 +924,17 @@ class BattleApp(App[None]):
             self._log("Could not find a character id in that URL.", kind="warn")
             return
         self._log(f"Importing character {cid} from D&D Beyond…", kind="import")
+        import_modal = None
         try:
+            import_modal = ImportingModal()
+            self.push_screen(import_modal)
             data = await asyncio.to_thread(ddb.fetch_character_data, cid)
         except Exception as exc:
             self._log(f"Import failed: {exc}", kind="warn")
             return
+        finally:
+            if import_modal is not None:
+                import_modal.dismiss()
         pc = ddb.extract_combatant(cid, data)
         if pc.name == f"Char {cid}":
             source = data.get("character")
@@ -883,7 +947,11 @@ class BattleApp(App[None]):
                 kind="warn",
             )
             return
-        pc.x, pc.y = find_free_spot(self.combatants, MAP_COLS, MAP_ROWS)
+        spot = find_free_spot(self.combatants, MAP_COLS, MAP_ROWS)
+        if spot is None:
+            self._log("Battle map is full — import skipped.", kind="warn")
+            return
+        pc.x, pc.y = spot
         self._push_undo()
         self.combatants.append(pc)
         self._sort_combatants()
@@ -945,14 +1013,24 @@ class BattleApp(App[None]):
         self._spawn_monster(picked)
 
     def _spawn_monster(self, template: str) -> None:
-        count = sum(1 for c in self.combatants if c.name == template or c.name.startswith(template + " ")) + 1
-        name = template if count == 1 else f"{template} {count}"
-        x, y = find_free_spot(self.combatants, MAP_COLS, MAP_ROWS)
-        mob = encounter_monster(template, name, x=x, y=y)
+        names = {c.name for c in self.combatants}
+        if template not in names:
+            n = template
+        else:
+            count = 2
+            while f"{template} {count}" in names:
+                count += 1
+            n = f"{template} {count}"
+        spot = find_free_spot(self.combatants, MAP_COLS, MAP_ROWS)
+        if spot is None:
+            self._log("Battle map is full — nothing spawned.", kind="warn")
+            return
+        x, y = spot
+        mob = encounter_monster(template, n, x=x, y=y)
         self._push_undo()
         self.combatants.append(mob)
         self._sort_combatants()
-        self._log(f"{name} joins the fight at {coord_name(x, y)} — press [bold]o[/] to roll its initiative.", kind="monster")
+        self._log(f"{n} joins the fight at {coord_name(x, y)} — press [bold]o[/] to roll its initiative.", kind="monster")
 
     def action_remove(self) -> None:
         if self._sel is not None:
@@ -978,6 +1056,7 @@ class BattleApp(App[None]):
             self._sel = self._turn or self.combatants[0]
             if self._turn is None:
                 self.action_next_turn()
+                self._sel = self._turn or self._sel
         else:
             self._sel = None
         self._rebuild_rows()
@@ -1060,7 +1139,11 @@ class BattleApp(App[None]):
         name = await self.push_screen(TextModal("ADD PC", "character name", confirm="Add"), wait_for_dismiss=True)
         if not name:
             return
-        x, y = find_free_spot(self.combatants, MAP_COLS, MAP_ROWS)
+        spot = find_free_spot(self.combatants, MAP_COLS, MAP_ROWS)
+        if spot is None:
+            self._log("Battle map is full — no PC added.", kind="warn")
+            return
+        x, y = spot
         pc = Combatant(
             name=name, kind="PC", hp=10, max_hp=10, ac=10, init=None, init_mod=0,
             role="Adventurer", note="New PC — tune with [bold]e[/].",
@@ -1100,11 +1183,8 @@ class BattleApp(App[None]):
         self._reset_encounter()
         self._log("Encounter reset to round 1.")
 
-    async def action_help(self) -> None:
-        self.run_worker(self._help_flow())
-
-    async def _help_flow(self) -> None:
-        await self.push_screen(HelpModal(), wait_for_dismiss=True)
+    def action_help(self) -> None:
+        self.push_screen(HelpModal())
 
 
 def main() -> None:

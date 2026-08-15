@@ -5,6 +5,7 @@ import os
 
 from app import BattleApp
 from ddb import parse_ddb_url
+from modals import HelpModal
 from textual.widgets import Input, Static
 
 SHOTS = os.path.join(os.path.dirname(__file__), "shots")
@@ -37,34 +38,45 @@ async def main() -> None:
             await pilot.pause()
         app.save_screenshot(os.path.join(SHOTS, "03-turns.png"))
 
-        # toggle a condition (poisoned) on the selected creature
+        # toggle a condition on the selected creature (list is sorted by name,
+        # so the first row — "blinded" — is what Enter applies)
+        cond_sel = app._sel
         await pilot.press("c")
         await pilot.pause()
         app.save_screenshot(os.path.join(SHOTS, "04-condition-modal.png"))
         await pilot.press("enter")
         await pilot.pause()
         app.save_screenshot(os.path.join(SHOTS, "05-condition-applied.png"))
+        assert cond_sel.conditions, f"{cond_sel.name} should have a condition toggled"
 
-        # add a monster
+        # add a monster (first alphabetically = Bandit)
+        before = len(app.combatants)
         await pilot.press("m")
         await pilot.pause()
         app.save_screenshot(os.path.join(SHOTS, "06-monster-modal.png"))
         await pilot.press("enter")
         await pilot.pause()
         app.save_screenshot(os.path.join(SHOTS, "07-monster-added.png"))
+        assert len(app.combatants) == before + 1
+        assert any(c.name.startswith("Bandit") for c in app.combatants)
 
         # help overlay
         await pilot.press("?")
         await pilot.pause()
+        assert isinstance(app.screen, HelpModal), type(app.screen)
         app.save_screenshot(os.path.join(SHOTS, "08-help.png"))
         await pilot.press("escape")
+        await pilot.pause()
 
+        # remove the selected creature (Goblin 2) with confirmation
+        doomed = app._sel.name
         await pilot.press("x")
         await pilot.pause()
         app.save_screenshot(os.path.join(SHOTS, "09-remove-confirm.png"))
         await pilot.press("enter")      # confirm the removal
         await pilot.pause()
         app.save_screenshot(os.path.join(SHOTS, "09-removed.png"))
+        assert doomed not in [c.name for c in app.combatants], f"{doomed} should be removed"
 
         # reset
         await pilot.press("r")
@@ -160,12 +172,15 @@ async def main() -> None:
         assert target.hp <= hp_before, (target.hp, hp_before)
         app.save_screenshot(os.path.join(SHOTS, "23-attack-resolved.png"))
 
-        # undo the attack (hp restored), then redo it (hp applied again)
+        # undo the attack (hp restored), then redo it (hp applied again).
+        # Undo must revert combatant state without rewinding turn/round.
+        rnd_before, turn_before = app.round, app._turn.name
         hp_after = [c for c in app.combatants if c.name == target.name][0].hp
         await pilot.press("u")
         await pilot.pause()
         t_undone = [c for c in app.combatants if c.name == target.name][0]
         assert t_undone.hp == hp_before, (t_undone.hp, hp_before)
+        assert app.round == rnd_before and app._turn.name == turn_before, (app.round, app._turn.name)
         await pilot.press("shift+u")
         await pilot.pause()
         t_redone = [c for c in app.combatants if c.name == target.name][0]
