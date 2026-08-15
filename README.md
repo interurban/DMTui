@@ -31,6 +31,7 @@ documents both staff code-review passes and every fix that came out of them.
 | `d` / `h` | damage / heal (amount prompt) |
 | `c` | toggle a condition |
 | `m` / `b` | add a monster / browse the searchable monster library |
+| `v` | spellbook — browse the SRD and add a spell to the selected creature |
 | `x` | remove the selected creature (asks first) |
 | `r` | reset to the scripted encounter |
 | `o` / `t` | roll monster initiative / set a creature's initiative |
@@ -60,6 +61,21 @@ dealing damage (save hints never halve a heal), and `3 darts` lines
 .venv/bin/python tests.py   # unit tests (pure logic + imports)
 .venv/bin/python smoke.py   # headless UI drive-through, screenshots in shots/
 ```
+
+## Open5e SRD content
+
+Press `b` to open the monster library and `v` to open the spellbook. Both merge
+the hand-authored templates with the official D&D 5e **System Reference
+Document**, fetched from [Open5e](https://open5e.com) on first use and cached to
+`.cache/open5e/`. The first open fetches in the background (needs network, once);
+subsequent opens are instant. SRD creatures/spells are converted into the same
+statblocks the rest of the app uses, so they're indistinguishable in play. Set
+`VTT_OFFLINE=1` to disable all network fetches.
+
+- `srd.py` is the generic client — `fetch_raw` / `get_collection` paginate and
+  cache any Open5e v2 collection, so other content (magic items, conditions, …)
+  can be added by supplying an endpoint + transform.
+
 
 ## Layout
 
