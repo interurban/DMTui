@@ -699,5 +699,121 @@ def main() -> None:
     print(f"TESTS OK ({len(fns)} passed)")
 
 
+# ---------------------------------------------------------------------------
+# Open5e SRD integration
+# ---------------------------------------------------------------------------
+
+import os
+import srd as srd_client
+import tempfile
+
+GOBLIN_SRD = {
+    "name": "Goblin",
+    "size": "Small",
+    "type": "humanoid",
+    "armor_class": 15,
+    "hit_points": 7,
+    "hit_dice": "2d6",
+    "ability_scores": {"strength": 8, "dexterity": 14, "constitution": 10,
+                       "intelligence": 10, "wisdom": 8, "charisma": 8},
+    "initiative_bonus": 2,
+    "saving_throws": {},
+    "skill_bonuses": {"stealth": 6},
+    "speed": {"walk": 30, "unit": "feet"},
+    "proficiency_bonus": None,
+    "passive_perception": None,
+    "challenge_rating": 0.25,
+    "desc": "A small humanoid that hates sunlight. It scuttles in the dark.",
+    "actions": [
+        {"name": "Scimitar",
+         "desc": "Melee Weapon Attack: +4 to hit, reach 5 ft., one target. Hit: 5 (1d6 + 2) slashing damage."},
+        {"name": "Shortbow",
+         "desc": "Ranged Weapon Attack: +4 to hit, range 80 ft., one target. Hit: 5 (1d6 + 2) piercing damage."},
+        {"name": "Fire Breath",
+         "desc": "The goblin exhales fire. Each creature in a 15-foot cone must make a DC 13 Dexterity saving throw, taking 21 (6d6) fire damage on a failed save."},
+        {"name": "Multiattack",
+         "desc": "The goblin makes two attacks."},
+    ],
+    "traits": ["Nimble Escape"],
+}
+
+
+def test_srd_monster_to_fields():
+    f = srd_client.srd_monster_to_fields(GOBLIN_SRD)
+    assert f["ac"] == 15 and f["max_hp"] == 7 and f["hp"] == 7
+    assert f["stats"][2] == 14 and f["init_mod"] == 2
+    assert f["role"] == "Small humanoid"
+    assert f["proficiency"] == 2  # CR 0.25 -> +2
+    assert any(a.startswith("Scimitar +4 · 1d6+2 sl") for a in f["attacks"]), f["attacks"]
+    assert any(a.startswith("Shortbow +4 · 1d6+2 pi") for a in f["attacks"]), f["attacks"]
+    # save-DC spell-like action -> spell line with a save hint
+    assert any("Fire Breath" in a and "fire" in a and "dex DC 13" in a for a in f["attacks"]), f["attacks"]
+    # plain ability (Multiattack) falls through to traits
+    assert any("Multiattack" in t for t in f["traits"]), f["traits"]
+    assert "Nimble Escape" in f["traits"]
+    assert f["saves"] == []  # no saving throws on the goblin
+
+
+def test_srd_fetch_and_cache():
+    page = {"next": None, "results": [
+        {"name": "Goblin", "document": {"key": "srd-2014"}, **GOBLIN_SRD},
+        {"name": "Homebrew Thing", "document": {"key": "not-srd"}, "armor_class": 10},
+    ]}
+    calls = []
+
+    def fake_get(url):
+        calls.append(url)
+        return page
+
+    with tempfile.TemporaryDirectory() as tmp:
+        with mock.patch.object(srd_client, "_http_get_json", fake_get), \
+             mock.patch.object(srd_client, "CACHE_DIR", tmp):
+            out = srd_client.get_srd_monsters(force=True)
+            # non-SRD document excluded
+            assert [m["name"] for m in out] == ["Goblin"], [m["name"] for m in out]
+            assert os.path.exists(os.path.join(tmp, "monsters.json"))
+            # second call reads the cache, no network (cached keys are JSON
+            # strings, so compare on stable identity fields, not raw equality)
+            calls.clear()
+            out2 = srd_client.get_srd_monsters(force=False)
+            assert [m["name"] for m in out2] == [m["name"] for m in out]
+            assert calls == []
+
+
+def test_srd_offline_no_cache():
+    def fake_get(url):
+        raise ValueError("Could not reach Open5e: offline")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        with mock.patch.object(srd_client, "_http_get_json", fake_get), \
+             mock.patch.object(srd_client, "CACHE_DIR", tmp):
+            assert srd_client.load_cache("monsters") is None
+            try:
+                srd_client.get_srd_monsters(force=True)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("offline fetch should raise ValueError")
+
+
+def test_srd_combatant_resolves():
+    """An SRD field dict builds a real Combatant whose weapon lines the engine
+    actually resolves (the contract _spawn_srd relies on)."""
+    from battle import Combatant, resolve_attack, _ATK_RE
+
+    f = srd_client.srd_monster_to_fields(GOBLIN_SRD)
+    c = Combatant(**f)
+    c.conditions = set(c.conditions or [])
+    c.saves = set(c.saves or [])
+    c.stats = {int(k): v for k, v in (c.stats or {}).items()}
+
+    weapon = next(a for a in c.attacks if a.startswith("Scimitar"))
+    assert _ATK_RE.match(weapon), weapon
+    target = Combatant("Dummy", "PC", hp=10, max_hp=10, ac=10)
+    # d20 rolls 10 (a hit, not a crit) then 1d6 -> 4
+    res = resolve_attack(c, weapon, target, Seq([10, 4]))
+    assert res["kind"] == "attack" and res["hit"] and res["damage"] == 6  # 4 + 2
+
+
 if __name__ == "__main__":
     main()

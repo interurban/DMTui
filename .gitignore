@@ -4,3 +4,4 @@ shots/
 encounter.json
 *.pyc
 campaigns.json
+.cache/

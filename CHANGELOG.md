@@ -3,6 +3,37 @@
 Sprint log for the Battle Tracker — a single-screen terminal combat tracker
 for D&D 5e DMs (Textual). Run: `.venv/bin/python app.py`.
 
+## Open5e SRD integration + enhanced monster library (complete)
+
+The tracker can now pull the official D&D 5e System Reference Document from
+Open5e and drop those creatures into a fight.
+
+- **`srd.py`** — a generic Open5e v2 client. `fetch_raw` / `get_collection`
+  paginate, filter to the freely redistributable SRD documents (`srd-2014`,
+  `srd-2024`), and cache results to `.cache/open5e/<name>.json` so a session
+  only hits the network once. It is built to grow: future content (spells,
+  magic items, conditions, …) slots in by adding an endpoint + a transform.
+- **Monster conversion** — `srd_monster_to_fields` maps a raw Open5e creature
+  into the same field dicts the rest of the app feeds to `Combatant`: AC, HP,
+  size/type role, ability scores, saves, speed, proficiency (derived from CR),
+  skills, passive Perception, hit dice, and the detail-card note. Statblock
+  action text is parsed into attack lines the engine already understands —
+  weapon lines (`Scimitar +4 · 1d6+2 sl`), save-DC spell lines
+  (`Fire Breath — 18d6 fire (dex DC 21)`), with plain abilities (Multiattack,
+  Nimble Escape, …) falling through to traits.
+- **Bigger, faster add-monster UI** — `b` now opens `MonsterLibrary`, a
+  near-full-screen searchable picker that merges the 20 hand-authored
+  templates (`[built-in]`) with the ~650 SRD monsters (`[SRD]`). Type to
+  filter by name/type/source; Enter or `a` adds the pick and **keeps the
+  picker open** so several monsters drop in mid-fight without re-opening;
+  `f` fetches the SRD library on demand (one-time, then cached); `Esc` closes.
+- `app.py` — `_browse_flow` loads the SRD cache (or fetches in the background
+  on first open), `_add_monster_entry` routes built-in vs SRD adds, and
+  `_spawn_srd` / `_add_combatant` / `_number_name` share the spawn+place+undo
+  logic. `.cache/` is gitignored; `VTT_OFFLINE` disables network fetches.
+- Tests: 4 new (SRD conversion, fetch+cache round-trip, offline failure,
+  engine-resolution contract) — 55 unit tests pass; full smoke passes.
+
 ## Map centring + detail card polish (complete)
 
 - Loaded PCs now land in the middle of the map: `_place_pc` spirals outward

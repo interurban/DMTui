@@ -40,7 +40,8 @@ from battle import (
 )
 import ddb
 from ddb import ABILITY_NAMES
-from modals import HelpModal, ImportingModal, ListModal, MonsterBrowser, NumberModal, TextModal
+from modals import HelpModal, ImportingModal, ListModal, MonsterLibrary, NumberModal, TextModal
+import srd as srd_client
 from widgets import CombatantRow, InitiativeList, LEFT_W, LogView, MapGrid
 
 SAVE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "encounter.json")
@@ -160,6 +161,8 @@ class BattleApp(App[None]):
     ModalScreen { align: center middle; background: rgba(8, 10, 14, 0.75); }
     .modal-title { text-style: bold; color: #e6ebf2; margin-bottom: 1; }
     .modal-box { width: 57; max-width: 92%; height: auto; border: thick #4a5b7a; background: #1b2029; padding: 1 2; }
+    .library-box { width: 92%; max-width: 120; height: 92%; }
+    #lib-list { height: 1fr; border: round #2a3446; margin-top: 1; }
     #modal-list { height: 15; border: round #2a3446; margin-top: 1; }
     .modal-item { padding: 0 1; color: #c9d3e0; }
     ListView:focus .modal-item { background: #2f3f5c; color: #ffffff; }
@@ -230,6 +233,7 @@ class BattleApp(App[None]):
         self._redo: list[dict] = []
         self._hp_entry: str | None = None
         self._hp_sign: int = 1
+        self._library_screen: MonsterLibrary | None = None
         self._setup()
 
     # -- lifecycle ---------------------------------------------------------
@@ -1293,30 +1297,86 @@ class BattleApp(App[None]):
         self.run_worker(self._browse_flow())
 
     async def _browse_flow(self) -> None:
-        picked = await self.push_screen(MonsterBrowser(MONSTERS), wait_for_dismiss=True)
-        if picked is None:
-            return
-        self._spawn_monster(picked)
+        srd_data = srd_client.load_cache("monsters")
+        if srd_data is None and not os.environ.get("VTT_OFFLINE"):
+            # No cached library yet — open with the built-ins and fetch SRD in
+            # the background so it populates the picker without blocking.
+            self.run_worker(self._fetch_srd_worker())
+        screen = MonsterLibrary(MONSTERS, srd_data or [], self._add_monster_entry, self._fetch_srd)
+        self._library_screen = screen
+        await self.push_screen(screen, wait_for_dismiss=True)
+        self._library_screen = None
 
-    def _spawn_monster(self, template: str) -> None:
+    def _add_monster_entry(self, payload: tuple[str, object]) -> str | None:
+        source, data = payload
+        if source == "builtin":
+            return self._spawn_monster(data)
+        return self._spawn_srd(data)
+
+    def _fetch_srd(self) -> None:
+        self.run_worker(self._fetch_srd_worker())
+
+    async def _fetch_srd_worker(self) -> None:
+        self._log("Fetching SRD monsters from Open5e…", kind="import")
+        try:
+            data = await asyncio.to_thread(srd_client.get_srd_monsters, False)
+        except Exception as exc:
+            self._log(f"SRD fetch failed: {exc}", kind="warn")
+            return
+        screen = self._library_screen
+        if screen is not None:
+            try:
+                screen.update_srd(data)
+            except Exception:
+                pass
+        self._log(f"Loaded {len(data)} SRD monsters from Open5e.", kind="import")
+
+    def _number_name(self, base: str, names: set[str]) -> str:
+        if base not in names:
+            return base
+        count = 2
+        while f"{base} {count}" in names:
+            count += 1
+        return f"{base} {count}"
+
+    def _add_combatant(self, c: Combatant, msg: str) -> None:
+        self._push_undo()
+        self.combatants.append(c)
+        self._sort_combatants()
+        self._log(msg, kind="monster")
+        self._refresh_all()
+
+    def _spawn_monster(self, template: str) -> str | None:
         names = {c.name for c in self.combatants}
-        if template not in names:
-            n = template
-        else:
-            count = 2
-            while f"{template} {count}" in names:
-                count += 1
-            n = f"{template} {count}"
+        n = self._number_name(template, names)
         spot = find_free_spot(self.combatants, MAP_COLS, MAP_ROWS)
         if spot is None:
             self._log("Battle map is full — nothing spawned.", kind="warn")
-            return
+            return None
         x, y = spot
         mob = encounter_monster(template, n, x=x, y=y)
-        self._push_undo()
-        self.combatants.append(mob)
-        self._sort_combatants()
-        self._log(f"{n} joins the fight at {coord_name(x, y)} — press [bold]r[/] to roll its initiative.", kind="monster")
+        self._add_combatant(mob, f"{n} joins the fight at {coord_name(x, y)} — press [bold]r[/] to roll its initiative.")
+        return n
+
+    def _spawn_srd(self, fields: dict) -> str | None:
+        names = {c.name for c in self.combatants}
+        base = fields.get("name", "Monster")
+        n = self._number_name(base, names)
+        spot = find_free_spot(self.combatants, MAP_COLS, MAP_ROWS)
+        if spot is None:
+            self._log("Battle map is full — nothing spawned.", kind="warn")
+            return None
+        c = Combatant(**fields)
+        c.name = n
+        c.conditions = set(c.conditions or [])
+        c.saves = set(c.saves or [])
+        c.stats = {int(k): v for k, v in (c.stats or {}).items()}
+        c.x, c.y = spot
+        self._add_combatant(
+            c,
+            f"{n} (SRD) joins at {coord_name(spot[0], spot[1])} — press [bold]r[/] to roll initiative.",
+        )
+        return n
 
     def action_remove(self) -> None:
         if self._sel is not None:

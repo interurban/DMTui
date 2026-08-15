@@ -98,59 +98,123 @@ class TextModal(ModalScreen[str]):
         self.dismiss(None)
 
 
-class MonsterBrowser(ModalScreen[str]):
-    """Searchable monster-library picker: type to filter, Enter to add."""
+class MonsterLibrary(ModalScreen[None]):
+    """Large, searchable monster picker — the DM's add-monster UI.
 
-    BINDINGS = [("escape", "cancel", "Cancel")]
+    Merges the hand-authored templates (tagged [built-in]) with the Open5e SRD
+    library (tagged [SRD]). Type to filter; Enter/a on a row adds it and keeps
+    the picker open so several monsters can be dropped in mid-fight without
+    re-opening. `f` pulls the SRD library on demand (needs network, one-time)."""
 
-    def __init__(self, monsters: dict) -> None:
+    BINDINGS = [
+        ("escape", "cancel", "Close"),
+        ("enter", "add_selected", "Add (stays open)"),
+        ("a", "add_selected", "Add"),
+        ("f", "fetch_srd", "Fetch SRD"),
+    ]
+
+    def __init__(self, builtins: dict, srd: list[dict] | None, add_fn, fetch_fn) -> None:
         super().__init__()
-        self._monsters = monsters
+        self._builtins = builtins
+        self._srd = list(srd or [])
+        self._add_fn = add_fn
+        self._fetch_fn = fetch_fn
+        self._current: list[tuple[str, tuple[str, object]]] = []
 
     def compose(self) -> ComposeResult:
-        with Container(classes="modal-box"):
-            yield Static("[bold #e6ebf2]MONSTER LIBRARY[/]", classes="modal-title")
-            yield Input(placeholder="type to filter…", id="browser-search")
-            yield ListView(id="modal-list")
-            yield Static("[dim][bold]Enter[/] add · [bold]Esc[/] cancel[/]", classes="modal-hint")
-
-    def _visible(self) -> list[str]:
-        q = self.query_one("#browser-search", Input).value.strip().lower()
-        names = [
-            name
-            for name in self._monsters
-            if not q
-            or q in name.lower()
-            or q in str(self._monsters[name].get("role", "")).lower()
-        ]
-        return sorted(names)
+        with Container(classes="modal-box library-box"):
+            yield Static("[bold #e6ebf2]MONSTER LIBRARY[/]  [dim]built-ins + SRD[/]", classes="modal-title")
+            yield Input(placeholder="filter by name, type, or source…", id="lib-search")
+            yield Static("", id="lib-status", classes="modal-hint")
+            yield ListView(id="lib-list")
+            yield Static(
+                "[dim][bold]Enter[/]/[bold]a[/] add (stays open) · [bold]f[/] fetch SRD · [bold]Esc[/] close[/]",
+                classes="modal-hint",
+            )
 
     def on_mount(self) -> None:
-        self.query_one("#browser-search").focus()
+        self.query_one("#lib-search", Input).focus()
         self._rebuild()
 
-    def on_input_changed(self, _: Input.Changed) -> None:
-        self._rebuild()
-
-    def on_input_submitted(self, _: Input.Submitted) -> None:
-        names = self._visible()
-        if len(names) == 1:
-            self.dismiss(names[0])
-        elif names:
-            self.query_one("#modal-list", ListView).focus()
+    def _entries(self) -> list[tuple[str, tuple[str, object]]]:
+        q = self.query_one("#lib-search", Input).value.strip().lower()
+        out: list[tuple[str, tuple[str, object]]] = []
+        for name, m in sorted(self._builtins.items()):
+            if not q or q in name.lower() or q in str(m.get("role", "")).lower():
+                label = f"{name}   [dim][built-in] hp {m['max_hp']} · ac {m['ac']} · {m.get('role', '')}[/]"
+                out.append((label, ("builtin", name)))
+        for m in self._srd:
+            nm = m.get("name", "?")
+            hay = f"{nm} {m.get('role', '')} {m.get('note', '')}".lower()
+            if not q or q in hay:
+                label = f"{nm}   [dim][SRD] hp {m['max_hp']} · ac {m['ac']} · {m.get('role', '')}[/]"
+                out.append((label, ("srd", m)))
+        return out
 
     def _rebuild(self) -> None:
-        names = self._visible()
-        self.query_one("#modal-list", ListView).clear()
-        for name in names:
-            m = self._monsters[name]
-            label = f"{name}   [dim]hp {m['max_hp']} · ac {m['ac']} · init {m['init']:+d}[/]"
-            self.query_one("#modal-list", ListView).append(ListItem(Label(label, classes="modal-item")))
+        entries = self._entries()
+        self._current = entries
+        lv = self.query_one("#lib-list", ListView)
+        lv.clear()
+        for label, _ in entries:
+            lv.append(ListItem(Label(label, classes="modal-item")))
+        lv.index = 0 if entries else None
+        total = len(entries)
+        src = "built-ins" + (f" + {len(self._srd)} SRD" if self._srd else " (SRD not loaded — press f)")
+        self.query_one("#lib-status", Static).update(
+            f"[dim]{total} match{'es' if total != 1 else ''} · {src}[/]"
+        )
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id == "lib-search":
+            self._rebuild()
+
+    def on_input_submitted(self, _: Input.Submitted) -> None:
+        if not self._current:
+            return
+        if len(self._current) == 1:
+            self._add(self._current[0][1])
+        else:
+            self.query_one("#lib-list", ListView).focus()
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         idx = event.list_view.index
-        if idx is not None and 0 <= idx < len(self._visible()):
-            self.dismiss(self._visible()[idx])
+        if idx is not None and 0 <= idx < len(self._current):
+            self._add(self._current[idx][1])
+
+    def action_add_selected(self) -> None:
+        lv = self.query_one("#lib-list", ListView)
+        idx = lv.index
+        if idx is not None and 0 <= idx < len(self._current):
+            self._add(self._current[idx][1])
+        elif len(self._current) == 1:
+            self._add(self._current[0][1])
+
+    def _add(self, payload: tuple[str, object]) -> None:
+        try:
+            added = self._add_fn(payload)
+        except Exception as exc:  # never let a bad add kill the picker
+            self.query_one("#lib-status", Static).update(f"[dim #d95841]Add failed: {exc}[/]")
+            return
+        if added:
+            self.query_one("#lib-status", Static).update(
+                f"[dim #3fae6a]Added {added} — press [bold]Esc[/] when done[/]"
+            )
+            lv = self.query_one("#lib-list", ListView)
+            if lv.index is None and self._current:
+                lv.index = 0
+
+    def action_fetch_srd(self) -> None:
+        self.query_one("#lib-status", Static).update("[dim #a8d0ff]Fetching SRD monsters…[/]")
+        try:
+            self._fetch_fn()
+        except Exception:
+            pass
+
+    def update_srd(self, data: list[dict]) -> None:
+        """Swap in freshly fetched SRD data and refresh the list."""
+        self._srd = list(data or [])
+        self._rebuild()
 
     def action_cancel(self) -> None:
         self.dismiss(None)

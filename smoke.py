@@ -5,6 +5,9 @@ import json
 import os
 import random
 
+# Keep the run fully offline: never auto-fetch the SRD library from Open5e.
+os.environ.setdefault("VTT_OFFLINE", "1")
+
 import app as appmod
 import ddb
 from app import BattleApp
@@ -525,18 +528,23 @@ async def main() -> None:
         await pilot.pause()
         assert len(app.combatants) == 0, len(app.combatants)
 
-        # monster library browser (b): type a filter, Enter adds the match
+        # monster library browser (b): type a filter, Enter adds the match.
+        # "goblin shaman" is built-in-only (absent from the SRD cache), so it is
+        # always a single match regardless of whether SRD data is present.
         await pilot.press("b")
         await pilot.pause()
-        await pilot.press("t", "r", "o", "l")
+        await pilot.press(*tuple("goblin shaman"))
         await pilot.pause()
         app.save_screenshot(os.path.join(SHOTS, "30-monster-browser.png"))
         await pilot.press("enter")
         await pilot.pause()
-        assert [c.name for c in app.combatants] == ["Troll"], [c.name for c in app.combatants]
-        troll = app.combatants[0]
-        assert troll.max_hp == 84 and troll.ac == 15 and troll.init_mod == 1
-        assert any("Regeneration" in t for t in troll.traits)
+        assert [c.name for c in app.combatants] == ["Goblin Shaman"], [c.name for c in app.combatants]
+        shaman = app.combatants[0]
+        assert shaman.max_hp == 17 and shaman.ac == 13 and shaman.init_mod == 2
+        assert any("Nimble Escape" in t for t in shaman.traits)
+        # the picker stays open after adding — close it, then undo
+        await pilot.press("escape")
+        await pilot.pause()
         await pilot.press("u")
         await pilot.pause()
         assert len(app.combatants) == 0, len(app.combatants)
