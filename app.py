@@ -303,7 +303,8 @@ class HelpModal(ModalScreen[None]):
                 "  [bold]a[/] attack   [bold]d[/] damage   [bold]h[/] heal\n"
                 "  [bold]c[/] condition   [bold]m[/] monster   [bold]x[/] remove   [bold]r[/] reset\n"
                 "  [bold]o[/] roll monster init   [bold]t[/] set init\n"
-                "  [bold]i[/] import PC   [bold]f[/] find\n"
+                "  [bold]i[/] import PC   [bold]f[/] find   [bold]e[/] edit\n"
+                "  [bold]p[/] add PC   [bold]ctrl+n[/] new encounter\n"
                 "  [bold]?[/] help   [bold]q[/] quit   [bold]ctrl+p[/] palette\n"
                 "  [bold]u[/] undo   [bold]shift+u[/] redo   [bold]s[/] save   [bold]l[/] load\n\n"
                 "[bold #a8d0ff]Map[/]\n"
@@ -470,6 +471,9 @@ class BattleApp(App[None]):
         Binding("m", "monster", "Monster"),
         Binding("i", "import_pc", "Import PC"),
         Binding("f", "find", "Find"),
+        Binding("e", "edit", "Edit"),
+        Binding("p", "add_pc", "Add PC"),
+        Binding("ctrl+n", "new_encounter", "New encounter"),
         Binding("x", "remove", "Remove"),
         Binding("r", "reset", "Reset"),
         Binding("plus", "heal_one", "+1"),
@@ -795,7 +799,7 @@ class BattleApp(App[None]):
 
     def _detail_status_text(self) -> str:
         return "  ·  ".join(
-            [hint("a", "attack"), hint("d", "damage"), hint("h", "heal"), hint("m", "monster"), hint("x", "remove")]
+            [hint("a", "attack"), hint("d", "damage"), hint("h", "heal"), hint("m", "monster"), hint("e", "edit")]
         )
 
     def _map_text(self, cell_w: int) -> Text:
@@ -1526,6 +1530,117 @@ class BattleApp(App[None]):
         else:
             self._sel = None
         self._rebuild_rows()
+
+    # -- edit --------------------------------------------------------------
+
+    def action_edit(self) -> None:
+        if self._sel is not None:
+            self.run_worker(self._edit_flow())
+
+    async def _edit_number(self, title: str, target: str, current: int) -> int | None:
+        return await self.push_screen(NumberModal(title, target, str(current)), wait_for_dismiss=True)
+
+    async def _edit_flow(self) -> None:
+        c = self._sel
+        if c is None:
+            return
+        fields = [
+            ("name", "Name", c.name[:20]),
+            ("max_hp", "Max HP", str(c.max_hp)),
+            ("ac", "AC", str(c.ac)),
+            ("init_mod", "Init mod", f"{c.init_mod:+d}"),
+            ("role", "Role", (c.role or "")[:16]),
+            ("note", "Note", (c.note or "")[:24]),
+        ]
+        for i in range(1, 7):
+            fields.append((f"stat:{i}", ABILITY_NAMES[i - 1], str(c.stats.get(i, 10))))
+        options = [(key, f"{label:<11} [dim]{cur}[/]") for key, label, cur in fields]
+        picked = await self.push_screen(ListModal(f"EDIT {c.name}", options), wait_for_dismiss=True)
+        if picked is None or self._sel is not c:
+            return
+
+        def do(mutate) -> None:
+            self._push_undo()
+            mutate()
+            self._log(f"{c.name} updated.", kind="select")
+
+        if picked == "name":
+            val = await self.push_screen(TextModal("EDIT NAME", c.name, confirm="Save"), wait_for_dismiss=True)
+            if val and val != c.name:
+                do(lambda: setattr(c, "name", val))
+        elif picked == "max_hp":
+            val = await self._edit_number("MAX HP", c.name, c.max_hp)
+            if val is not None and val != c.max_hp:
+                def _max_hp() -> None:
+                    c.max_hp = max(1, val)
+                    c.hp = min(c.hp, c.max_hp)
+                do(_max_hp)
+        elif picked == "ac":
+            val = await self._edit_number("AC", c.name, c.ac)
+            if val is not None and val != c.ac:
+                do(lambda: setattr(c, "ac", max(0, val)))
+        elif picked == "init_mod":
+            val = await self._edit_number("INIT MOD", c.name, c.init_mod)
+            if val is not None and val != c.init_mod:
+                do(lambda: setattr(c, "init_mod", val))
+        elif picked == "role":
+            val = await self.push_screen(TextModal("EDIT ROLE", c.role, confirm="Save"), wait_for_dismiss=True)
+            if val and val != c.role:
+                do(lambda: setattr(c, "role", val))
+        elif picked == "note":
+            val = await self.push_screen(TextModal("EDIT NOTE", c.note, confirm="Save"), wait_for_dismiss=True)
+            if val and val != c.note:
+                do(lambda: setattr(c, "note", val))
+        elif picked.startswith("stat:"):
+            aid = int(picked.split(":")[1])
+            val = await self._edit_number(f"{ABILITY_NAMES[aid - 1]} SCORE", c.name, c.stats.get(aid, 10))
+            if val is not None and 1 <= val <= 30 and val != c.stats.get(aid, 10):
+                do(lambda: c.stats.__setitem__(aid, val))
+        else:
+            return
+        self._refresh_all()
+
+    # -- add PC & new encounter ---------------------------------------------
+
+    def action_add_pc(self) -> None:
+        self.run_worker(self._add_pc_flow())
+
+    async def _add_pc_flow(self) -> None:
+        name = await self.push_screen(TextModal("ADD PC", "character name", confirm="Add"), wait_for_dismiss=True)
+        if not name:
+            return
+        x, y = find_free_spot(self.combatants, MAP_COLS, MAP_ROWS)
+        pc = Combatant(
+            name=name, kind="PC", hp=10, max_hp=10, ac=10, init=None, init_mod=0,
+            role="Adventurer", note="New PC — tune with [bold]e[/].",
+            x=x, y=y, stats={i: 10 for i in range(1, 7)},
+        )
+        self._push_undo()
+        self.combatants.append(pc)
+        self._sel = pc
+        self._sort_combatants()
+        self._log(f"{pc.name} joins the party at {coord_name(x, y)}.", kind="import")
+
+    def action_new_encounter(self) -> None:
+        self.run_worker(self._new_encounter_flow())
+
+    async def _new_encounter_flow(self) -> None:
+        if self.combatants:
+            options = [
+                ("yes", "[bold #d95841]Start a blank encounter[/]"),
+                ("no", "Cancel"),
+            ]
+            picked = await self.push_screen(ListModal("NEW ENCOUNTER?", options), wait_for_dismiss=True)
+            if picked != "yes":
+                return
+        self._push_undo()
+        self.combatants = []
+        self.round = 1
+        self._turn = None
+        self._sel = None
+        self._moving = False
+        self._rebuild_rows()
+        self._log("Blank encounter — add PCs ([bold]p[/]) and monsters ([bold]m[/]).", kind="select")
 
     # -- misc ---------------------------------------------------------------
 

@@ -3,6 +3,21 @@
 Sprint log for the Battle Tracker — a single-screen terminal combat tracker
 for D&D 5e DMs (Textual). Run: `.venv/bin/python app.py`.
 
+## Sprint B — Editability + encounter building (complete)
+
+Made the encounter yours to build:
+
+- `e`: edit the selected creature — name, max HP (current HP clamps), AC,
+  initiative mod, role, note, and all six ability scores. Mods/saves in the
+  detail card recompute live. Undo-safe (snapshot pushed before the change).
+- `p`: add a PC from a name prompt — default stats (10s), AC 10, HP 10,
+  auto-placed on a free map spot and selected. Multiple PCs work everywhere
+  (import, add, attack, initiative).
+- `ctrl+n`: new blank encounter (confirm-first when creatures exist) —
+  undoable and redoable like every other change.
+- Help text + detail hint bar updated (`e edit` now in the hints; `x remove`
+  is behind its confirm).
+
 ## Sprint C — Undo + persistence (complete)
 
 Made mistakes cheap and sessions durable:
@@ -50,7 +65,5 @@ Made the stat blocks real instead of decorative:
 
 ## Next
 
-- **B: Editability + encounter building** — edit combatant fields, blank/new
-  encounter, add PC with stats, multiple PCs.
 - **E: Tests + import hardening** — normalize DDB parsing against realistic
   payloads, split the monolith.

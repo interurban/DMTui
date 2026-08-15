@@ -262,6 +262,66 @@ async def main() -> None:
         assert "Imported Zephyr" in log_txt, log_txt
         app.save_screenshot(os.path.join(SHOTS, "20-imported.png"))
 
+        # edit a name (e -> first field -> type + enter), then undo it
+        await pilot.press("e")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        app.screen.query_one(Input).value = "Zephyrin"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert any(c.name == "Zephyrin" for c in app.combatants), [c.name for c in app.combatants]
+        app.save_screenshot(os.path.join(SHOTS, "26-edit-name.png"))
+        await pilot.press("u")
+        await pilot.pause()
+        assert any(c.name == "Zephyr" for c in app.combatants), [c.name for c in app.combatants]
+
+        # edit AC (e -> down down -> ac field), then undo it
+        grish = [c for c in app.combatants if c.name == "Grish"][0]
+        app._sel = grish
+        await pilot.press("e")
+        await pilot.pause()
+        await pilot.press("down", "down", "enter")
+        await pilot.pause()
+        app.screen.query_one(Input).value = "18"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert grish.ac == 18, grish.ac
+        app.save_screenshot(os.path.join(SHOTS, "27-edit-ac.png"))
+        await pilot.press("u")
+        await pilot.pause()
+        grish = [c for c in app.combatants if c.name == "Grish"][0]
+        assert grish.ac == 17, grish.ac
+
+        # add a PC from scratch (p -> name -> enter)
+        n = len(app.combatants)
+        await pilot.press("p")
+        await pilot.pause()
+        app.screen.query_one(Input).value = "Lyra"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert len(app.combatants) == n + 1, len(app.combatants)
+        lyra = [c for c in app.combatants if c.name == "Lyra"][0]
+        assert lyra.kind == "PC" and lyra.ac == 10 and lyra.hp == 10 and lyra.max_hp == 10
+        assert lyra.stats == {1: 10, 2: 10, 3: 10, 4: 10, 5: 10, 6: 10}, lyra.stats
+        assert app._sel is lyra
+        app.save_screenshot(os.path.join(SHOTS, "28-add-pc.png"))
+
+        # new blank encounter (ctrl+n -> confirm), then undo/redo it
+        await pilot.press("ctrl+n")
+        await pilot.pause()
+        app.save_screenshot(os.path.join(SHOTS, "29-new-encounter.png"))
+        await pilot.press("enter")
+        await pilot.pause()
+        assert len(app.combatants) == 0, len(app.combatants)
+        assert app.round == 1
+        await pilot.press("u")
+        await pilot.pause()
+        assert len(app.combatants) == n + 1, len(app.combatants)
+        await pilot.press("shift+u")
+        await pilot.pause()
+        assert len(app.combatants) == 0, len(app.combatants)
+
         print("SMOKE OK")
 
 
