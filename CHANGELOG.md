@@ -3,6 +3,24 @@
 Sprint log for the Battle Tracker — a single-screen terminal combat tracker
 for D&D 5e DMs (Textual). Run: `.venv/bin/python app.py`.
 
+## Sprint C — Undo + persistence (complete)
+
+Made mistakes cheap and sessions durable:
+
+- `u` / `shift+u`: undo/redo with full-state snapshots (HP, conditions,
+  position, initiative, adds/removes, round, turn, selection), capped at 50.
+  Every mutating action pushes a snapshot: damage/heal, attacks, movement,
+  condition toggles, initiative roll/set, add monster, import, remove, reset.
+- `x` removal now asks for confirmation before removing a creature.
+- `s` / `l`: save the whole session to `encounter.json` and load it back —
+  HP, positions, conditions, round, turn all survive a restart.
+- Fixed a real bug: JSON round-trips turned `stats`' integer keys into strings,
+  which broke ability mods/saves after a load.
+- Help text + log-status hints updated for undo/save/load; `encounter.json`
+  added to `.gitignore`.
+- Tests: 13 unit (new JSON round-trip regression), smoke extended with
+  confirm-remove, undo/redo, and save/load scenarios.
+
 ## Sprint A — Dice + attack resolution (complete)
 
 Made the stat blocks real instead of decorative:
@@ -32,8 +50,6 @@ Made the stat blocks real instead of decorative:
 
 ## Next
 
-- **C: Undo + persistence** — undo stack (HP/conditions/removal), confirm on
-  `x`, save/load encounters to disk.
 - **B: Editability + encounter building** — edit combatant fields, blank/new
   encounter, add PC with stats, multiple PCs.
 - **E: Tests + import hardening** — normalize DDB parsing against realistic

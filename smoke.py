@@ -60,6 +60,9 @@ async def main() -> None:
 
         await pilot.press("x")
         await pilot.pause()
+        app.save_screenshot(os.path.join(SHOTS, "09-remove-confirm.png"))
+        await pilot.press("enter")      # confirm the removal
+        await pilot.pause()
         app.save_screenshot(os.path.join(SHOTS, "09-removed.png"))
 
         # reset
@@ -156,7 +159,38 @@ async def main() -> None:
         assert target.hp <= hp_before, (target.hp, hp_before)
         app.save_screenshot(os.path.join(SHOTS, "23-attack-resolved.png"))
 
+        # undo the attack (hp restored), then redo it (hp applied again)
+        hp_after = [c for c in app.combatants if c.name == target.name][0].hp
+        await pilot.press("u")
+        await pilot.pause()
+        t_undone = [c for c in app.combatants if c.name == target.name][0]
+        assert t_undone.hp == hp_before, (t_undone.hp, hp_before)
+        await pilot.press("shift+u")
+        await pilot.pause()
+        t_redone = [c for c in app.combatants if c.name == target.name][0]
+        assert t_redone.hp == hp_after, (t_redone.hp, hp_after)
+        app.save_screenshot(os.path.join(SHOTS, "24-undo-redo.png"))
+
+        # save the session to disk, damage a PC, then load it back
+        import app as appmod
+        dent = [c for c in app.combatants if c.kind == "PC"][0]
+        appmod.SAVE_PATH = os.path.join(SHOTS, "encounter-test.json")
+        await pilot.press("s")
+        await pilot.pause()
+        assert os.path.exists(appmod.SAVE_PATH)
+        hp0 = dent.hp
+        await pilot.press("d", "5", "enter")
+        await pilot.pause()
+        assert dent.hp == hp0 - 5, dent.hp
+        await pilot.press("l")
+        await pilot.pause()
+        dent_loaded = [c for c in app.combatants if c.kind == "PC"][0]
+        assert dent_loaded.hp == hp0, dent_loaded.hp
+        os.remove(appmod.SAVE_PATH)
+        app.save_screenshot(os.path.join(SHOTS, "25-save-load.png"))
+
         # initiative: AC shows in the init rows
+        dent = [c for c in app.combatants if c.kind == "PC"][0]
         row_text = str(app._rows[id(dent)].render().plain)
         assert "AC 22" in row_text, row_text
         assert "--" in row_text, row_text  # blank init shows as --

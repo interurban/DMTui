@@ -73,6 +73,8 @@ COND_SHORT = {
 CELL_W = 4  # battle-map cell width in columns
 LEFT_W = 4  # battle-map left gutter (row labels)
 
+SAVE_PATH = "encounter.json"  # where 's' writes / 'l' reads the session
+
 
 def _abbrev(name: str) -> str:
     return COND_SHORT.get(name, name[:6])
@@ -302,7 +304,8 @@ class HelpModal(ModalScreen[None]):
                 "  [bold]c[/] condition   [bold]m[/] monster   [bold]x[/] remove   [bold]r[/] reset\n"
                 "  [bold]o[/] roll monster init   [bold]t[/] set init\n"
                 "  [bold]i[/] import PC   [bold]f[/] find\n"
-                "  [bold]?[/] help   [bold]q[/] quit   [bold]ctrl+p[/] palette\n\n"
+                "  [bold]?[/] help   [bold]q[/] quit   [bold]ctrl+p[/] palette\n"
+                "  [bold]u[/] undo   [bold]shift+u[/] redo   [bold]s[/] save   [bold]l[/] load\n\n"
                 "[bold #a8d0ff]Map[/]\n"
                 "  click a token to select it; [bold]g[/] grabs, arrows place it\n"
                 "  [bold][#c9a227]▶ gold[/][/] = turn   [bold][#5b6471]✝ dim[/][/] = down\n"
@@ -473,6 +476,10 @@ class BattleApp(App[None]):
         Binding("minus", "damage_one", "-1"),
         Binding("question_mark", "help", "Help"),
         Binding("escape", "release", "Drop"),
+        Binding("u", "undo", "Undo"),
+        Binding("shift+u", "redo", "Redo"),
+        Binding("s", "save", "Save"),
+        Binding("l", "load", "Load"),
         Binding("q", "quit", "Quit"),
     ]
 
@@ -487,6 +494,8 @@ class BattleApp(App[None]):
         self._messages: list[tuple[str, str, bool]] = []
         self._log_view: LogView | None = None
         self._rng = random.Random()
+        self._undo: list[dict] = []
+        self._redo: list[dict] = []
         self._setup()
 
     # -- lifecycle ---------------------------------------------------------
@@ -538,6 +547,94 @@ class BattleApp(App[None]):
     def _reset_encounter(self) -> None:
         self._setup()
         self._rebuild_rows()
+
+    # -- undo / redo / persistence ------------------------------------------
+
+    def _combatant_snap(self, c: Combatant) -> dict:
+        return {
+            "name": c.name, "kind": c.kind, "hp": c.hp, "max_hp": c.max_hp, "ac": c.ac,
+            "init": c.init, "init_mod": c.init_mod, "conditions": sorted(c.conditions),
+            "role": c.role, "note": c.note, "x": c.x, "y": c.y,
+            "stats": dict(c.stats), "saves": sorted(c.saves), "speed": c.speed,
+            "proficiency": c.proficiency, "hit_dice": c.hit_dice, "skills": dict(c.skills),
+            "passive_perception": c.passive_perception, "attacks": list(c.attacks),
+            "traits": list(c.traits), "spells": list(c.spells),
+        }
+
+    def _snapshot(self) -> dict:
+        return {
+            "version": 1,
+            "combatants": [self._combatant_snap(c) for c in self.combatants],
+            "round": self.round,
+            "turn": self.combatants.index(self._turn) if self._turn is not None else None,
+            "sel": self.combatants.index(self._sel) if self._sel is not None else None,
+            "moving": self._moving,
+        }
+
+    def _push_undo(self) -> None:
+        self._undo.append(self._snapshot())
+        if len(self._undo) > 50:
+            self._undo.pop(0)
+        self._redo.clear()
+
+    def _restore(self, snap: dict) -> None:
+        new_combatants = []
+        for s in snap.get("combatants", []):
+            s = dict(s)
+            stats = s.get("stats") or {}
+            s["stats"] = {int(k): v for k, v in stats.items()}
+            c = Combatant(**s)
+            c.conditions = set(s.get("conditions", []))
+            c.saves = set(s.get("saves", []))
+            new_combatants.append(c)
+        self.combatants = new_combatants
+        self.round = int(snap.get("round", 1))
+        n = len(new_combatants)
+        turn_i = snap.get("turn")
+        sel_i = snap.get("sel")
+        self._turn = new_combatants[turn_i] if n and isinstance(turn_i, int) and 0 <= turn_i < n else None
+        self._sel = new_combatants[sel_i] if n and isinstance(sel_i, int) and 0 <= sel_i < n else (self._turn or (new_combatants[0] if n else None))
+        self._moving = False
+        self._rebuild_rows()
+
+    def action_undo(self) -> None:
+        if not self._undo:
+            self._log("Nothing to undo.", kind="warn")
+            return
+        self._redo.append(self._snapshot())
+        self._restore(self._undo.pop())
+        self._log("Undid last change.", kind="select")
+
+    def action_redo(self) -> None:
+        if not self._redo:
+            self._log("Nothing to redo.", kind="warn")
+            return
+        self._undo.append(self._snapshot())
+        self._restore(self._redo.pop())
+        self._log("Redid change.", kind="select")
+
+    def action_save(self) -> None:
+        try:
+            with open(SAVE_PATH, "w") as f:
+                json.dump(self._snapshot(), f, indent=2)
+        except OSError as exc:
+            self._log(f"Save failed: {exc}", kind="warn")
+            return
+        self._log(f"Encounter saved to {SAVE_PATH}.", kind="import")
+
+    def action_load(self) -> None:
+        try:
+            with open(SAVE_PATH) as f:
+                snap = json.load(f)
+        except OSError as exc:
+            self._log(f"No saved encounter ({exc}).", kind="warn")
+            return
+        except (ValueError, TypeError) as exc:
+            self._log(f"Save file corrupt: {exc}", kind="warn")
+            return
+        self._push_undo()
+        self._restore(snap)
+        self._log(f"Loaded encounter — {len(self.combatants)} creatures, round {self.round}.", kind="import")
 
     # -- rows & refresh ----------------------------------------------------
 
@@ -692,7 +789,9 @@ class BattleApp(App[None]):
         return "  ·  ".join([hint("↑↓", "select"), hint("n", "next"), hint("o", "roll init"), hint("t", "set init")])
 
     def _log_status_text(self) -> str:
-        return "  ·  ".join([hint("r", "reset"), hint("?", "help"), hint("q", "quit")])
+        return "  ·  ".join(
+            [hint("r", "reset"), hint("s", "save"), hint("l", "load"), hint("u", "undo"), hint("?", "help"), hint("q", "quit")]
+        )
 
     def _detail_status_text(self) -> str:
         return "  ·  ".join(
@@ -757,6 +856,7 @@ class BattleApp(App[None]):
             if c is not sel and (c.x, c.y) == (nx, ny):
                 self._log(f"{coord_name(nx, ny)} is held by {c.name}.", kind="warn")
                 return
+        self._push_undo()
         sel.x, sel.y = nx, ny
         self._refresh_all()
 
@@ -864,6 +964,9 @@ class BattleApp(App[None]):
             return
         pending = [m for m in monsters if m.init is None]
         targets = pending or monsters
+        if not targets:
+            return
+        self._push_undo()
         for m in targets:
             d20 = self._rng.randint(1, 20)
             m.init = d20 + m.init_mod
@@ -883,6 +986,7 @@ class BattleApp(App[None]):
         )
         if value is None:
             return
+        self._push_undo()
         target.init = value
         self._log(f"{target.name} set to initiative {value}.", kind="turn")
         self._sort_combatants()
@@ -924,6 +1028,7 @@ class BattleApp(App[None]):
     def _apply_hp(self, c: Combatant, delta: int) -> None:
         if delta == 0:
             return
+        self._push_undo()
         was_alive = c.alive
         c.hp = max(0, min(c.max_hp, c.hp + delta))
         if delta > 0:
@@ -973,6 +1078,7 @@ class BattleApp(App[None]):
         self._apply_attack_result(c, target, result)
 
     def _apply_attack_result(self, c: Combatant, target: Combatant, res: dict) -> None:
+        self._push_undo()
         if res["kind"] == "attack":
             head = f"{c.name}: {res['name']} → [bold #e6ebf2]{res['roll']}[/] vs AC {target.ac} — "
             if not res["hit"]:
@@ -1080,6 +1186,7 @@ class BattleApp(App[None]):
             )
             return
         pc.x, pc.y = find_free_spot(self.combatants, MAP_COLS, MAP_ROWS)
+        self._push_undo()
         self.combatants.append(pc)
         self._sort_combatants()
         self._log(f"Imported {pc.name} ({pc.role}) — HP {pc.hp}/{pc.max_hp}, AC {pc.ac}.", kind="import")
@@ -1354,6 +1461,7 @@ class BattleApp(App[None]):
         return await self.push_screen(ListModal("TOGGLE CONDITION", options), wait_for_dismiss=True)
 
     def toggle_condition(self, c: Combatant, picked: str) -> None:
+        self._push_undo()
         if picked in c.conditions:
             c.conditions.discard(picked)
             self._log(f"{picked} cleared on {c.name}", kind="condition")
@@ -1386,14 +1494,27 @@ class BattleApp(App[None]):
                         passive_perception=tmpl.get("passive_perception"),
                         attacks=list(tmpl.get("attacks", [])), traits=list(tmpl.get("traits", [])),
                         spells=list(tmpl.get("spells", [])))
+        self._push_undo()
         self.combatants.append(mob)
         self._sort_combatants()
         self._log(f"{name} joins the fight at {coord_name(x, y)} — press [bold]o[/] to roll its initiative.", kind="monster")
 
     def action_remove(self) -> None:
-        if self._sel is None:
-            return
+        if self._sel is not None:
+            self.run_worker(self._remove_flow())
+
+    async def _remove_flow(self) -> None:
         gone = self._sel
+        if gone is None:
+            return
+        options = [
+            (f"yes:{gone.name}", f"[bold #d95841]✝ Remove {gone.name}[/]"),
+            ("no", "Cancel"),
+        ]
+        picked = await self.push_screen(ListModal(f"REMOVE {gone.name}?", options), wait_for_dismiss=True)
+        if not picked or not picked.startswith("yes:"):
+            return
+        self._push_undo()
         if gone is self._turn:
             self._turn = None
         self.combatants.remove(gone)
@@ -1409,6 +1530,7 @@ class BattleApp(App[None]):
     # -- misc ---------------------------------------------------------------
 
     def action_reset(self) -> None:
+        self._push_undo()
         self._reset_encounter()
         self._log("Encounter reset to round 1.")
 

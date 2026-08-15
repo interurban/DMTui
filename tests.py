@@ -134,6 +134,25 @@ def test_parse_ddb_url():
     assert parse_ddb_url("") is None
 
 
+def test_combatant_snap_json_roundtrip():
+    """Snapshots survive a JSON save/load: ability-score keys come back as
+    strings and must be re-normalised to ints before use (regression)."""
+    import json
+
+    from app import BattleApp
+
+    app = BattleApp()
+    c = app.combatants[0]
+    loaded = json.loads(json.dumps(app._combatant_snap(c)))
+    assert all(isinstance(k, str) for k in loaded["stats"])
+    norm = {int(k): v for k, v in loaded["stats"].items()}
+    restored = Combatant(**{**loaded, "stats": norm})
+    restored.conditions = set(loaded.get("conditions", []))
+    restored.saves = set(loaded.get("saves", []))
+    assert restored.mod(1) == 4          # STR 19
+    assert restored.save(1) == 7         # STR save is proficient (+3 prof)
+
+
 def main() -> None:
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for fn in fns:
