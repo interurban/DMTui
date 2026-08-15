@@ -64,6 +64,7 @@ class Combatant:
     attacks: list[str] = field(default_factory=list)       # e.g. "Longsword +7 · 1d8+4 sl"
     traits: list[str] = field(default_factory=list)        # special abilities
     spells: list[str] = field(default_factory=list)        # spellcaster spells
+    ddb_id: int | None = None                              # source D&D Beyond character id, if imported
 
     @property
     def alive(self) -> bool:
@@ -117,9 +118,9 @@ _ATK_RE = re.compile(
     r"^(?P<name>.*?)\s*(?P<bonus>[+-]\d+)\s*·\s*(?P<dice>\d*d\d+(?:[+-]\d+)?)\s*(?P<dtype>\w+)?$"
 )
 _DICE_RE = re.compile(r"\d*d\d+(?:[+-]\d+)?")
-_HEAL_RE = re.compile(r"\b(heal\w*|cure\w*|restore\w*|mend\w*|regain\w*|hit points|hp)\b", re.IGNORECASE)
+_HEAL_RE = re.compile(r"\b(heal\w*|cure\w*|restore\w*|mend\w*|regain\w*|regenerat\w*)\b", re.IGNORECASE)
 _SAVE_RE = re.compile(r"\(([a-z]+)\s+dc\s*(\d+)\)", re.IGNORECASE)
-_DARTS_RE = re.compile(r"(\d+)\s*darts?\b", re.IGNORECASE)
+_DARTS_RE = re.compile(r"(\d+)\s+darts?\b", re.IGNORECASE)
 _SAVE_ABILITY_ID = {"str": 1, "dex": 2, "con": 3, "int": 4, "wis": 5, "cha": 6}
 
 

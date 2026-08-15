@@ -1,15 +1,74 @@
 """Headless smoke test — drives the app with a pilot and saves screenshots."""
 
 import asyncio
+import json
 import os
 import random
 
+import app as appmod
+import ddb
 from app import BattleApp
+from battle import Combatant
 from ddb import parse_ddb_url
-from modals import HelpModal
+from modals import HelpModal, ListModal, TextModal
 from textual.widgets import Input, Static
 
 SHOTS = os.path.join(os.path.dirname(__file__), "shots")
+
+# campaign boot is mocked offline: the three default character ids (plus one
+# more for the manual import test) resolve to canned D&D Beyond payloads
+DEFAULT_IDS = [91566422, 112516506, 90060446]
+
+
+def _canned(name, race, cls, level, hp, stats, items, spells=None, bonus=0):
+    return {
+        "name": name,
+        "classes": [{"level": level, "definition": {"name": cls}}],
+        "race": {"fullName": race},
+        "baseHitPoints": hp,
+        "bonusHitPoints": bonus,
+        "removedHitPoints": 0,
+        "stats": [{"id": i, "value": v} for i, v in enumerate(stats, start=1)],
+        "inventory": items,
+        "spells": spells or {},
+        "modifiers": {},
+    }
+
+
+def _weapon(name, dice, stat_bonus, *, atype=1, damage_type="Bludgeoning", ranged=False):
+    d = {"name": name, "damage": {"diceString": dice, "value": 0}, "damageBonus": 0,
+         "damageType": damage_type, "attackType": atype}
+    if ranged:
+        d["range"] = 80
+    return {"equipped": True, "definition": d}
+
+
+def _armor(name, ac, atype):
+    return {"equipped": True, "definition": {"name": name, "armorClass": ac, "armorTypeId": atype}}
+
+
+CANNED = {
+    91566422: _canned(
+        "Zephyr", "Gnome", "Wizard", 4, 20, [8, 14, 10, 17, 10, 10],
+        [_weapon("Quarterstaff", "1d6", 0)],
+        spells={"0": [{"definition": {"name": "Fire Bolt", "level": 0}}],
+                "1": [{"definition": {"name": "Shield", "level": 1}}]},
+        bonus=4,
+    ),
+    112516506: _canned(
+        "Lyra", "Halfling", "Rogue", 3, 18, [10, 18, 12, 12, 12, 14],
+        [_armor("Leather", 11, 1), _weapon("Shortbow", "1d6", 0, damage_type="Piercing", ranged=True)],
+    ),
+    90060446: _canned(
+        "Tess", "Human", "Fighter", 3, 28, [16, 10, 14, 8, 12, 8],
+        [_armor("Plate", 18, 3), _weapon("Greatsword", "2d6", 0, damage_type="Slashing")],
+    ),
+    9876543: _canned(
+        "Nix", "Dwarf", "Cleric", 2, 14, [12, 12, 12, 12, 12, 12],
+        [_weapon("Warhammer", "1d8", 0)],
+    ),
+}
+ddb.fetch_character_data = lambda cid: CANNED[cid]
 
 
 class _Seq:
@@ -25,26 +84,87 @@ class _Seq:
         return values[0]
 
 
+async def _wait_pcs(pilot, n):
+    app = pilot.app
+    for _ in range(50):
+        await pilot.pause()
+        if len([c for c in app.combatants if c.kind == "PC"]) == n:
+            return
+    raise AssertionError(f"expected {n} PCs after boot, got {len(app.combatants)}")
+
+
+async def _wait_modal(pilot, cls):
+    for _ in range(50):
+        await pilot.pause()
+        if isinstance(pilot.app.screen, cls):
+            return
+    raise AssertionError(f"expected {cls.__name__}, got {type(pilot.app.screen).__name__}")
+
+
 async def main() -> None:
     os.makedirs(SHOTS, exist_ok=True)
+    appmod.CAMPAIGN_PATH = os.path.join(SHOTS, "campaigns-test.json")
+    appmod.SAVE_PATH = os.path.join(SHOTS, "encounter-test.json")
+    for p in (appmod.CAMPAIGN_PATH, appmod.SAVE_PATH):
+        if os.path.exists(p):
+            os.remove(p)
+
     app = BattleApp()
     async with app.run_test(size=(130, 50)) as pilot:
+        await _wait_pcs(pilot, 3)
         await pilot.pause()
+
+        # campaign boot imported the three default PCs, no monsters yet
+        pcs = [c for c in app.combatants if c.kind == "PC"]
+        assert [c.name for c in pcs] == ["Zephyr", "Lyra", "Tess"], [c.name for c in pcs]
+        assert [c.ddb_id for c in pcs] == DEFAULT_IDS, [c.ddb_id for c in pcs]
+        assert len(app.combatants) == 3
+        assert app.round == 1
+        zephyr, lyra, tess = pcs
+        assert (zephyr.hp, zephyr.max_hp, zephyr.ac) == (24, 24, 12)
+        assert (lyra.hp, lyra.max_hp, lyra.ac) == (21, 21, 15)
+        assert (tess.hp, tess.max_hp, tess.ac) == (34, 34, 18)
+        assert all(c.init is None for c in app.combatants)
+        assert zephyr.attacks and zephyr.attacks[0].startswith("Quarterstaff +1 · 1d6-1")
+        assert lyra.attacks[0].startswith("Shortbow +6 · 1d6+4")
+        assert tess.attacks[0].startswith("Greatsword +5 · 2d6+3")
+        assert "Fire Bolt" in zephyr.spells and "Shield" in zephyr.spells
         app.save_screenshot(os.path.join(SHOTS, "01-start.png"))
 
-        # default encounter: Dent is the only PC, everyone's initiative is blank
-        pcs = [c for c in app.combatants if c.kind == "PC"]
-        assert [c.name for c in pcs] == ["Dent"], pcs
-        assert all(c.init is None for c in app.combatants)
-        dent = pcs[0]
-        assert dent.hp == 60 and dent.max_hp == 60 and dent.ac == 22
-
-        # damage Goblin 2 by 5 (encounter order: Dent, Hobgoblin, G1, G2, …)
-        await pilot.press("j", "j", "j")  # move to Goblin 2
-        assert app._sel.name == "Goblin 2", app._sel.name
-        await pilot.press("d", "5", "enter")
+        # inline damage: d arms entry, digits show in the status bar, enter applies
+        hp0 = zephyr.hp
+        await pilot.press("d")
         await pilot.pause()
+        status = str(app.query_one("#init-status", Static).content)
+        assert "DAMAGE" in status and "Enter" in status, status
+        await pilot.press("5")
+        await pilot.pause()
+        status = str(app.query_one("#init-status", Static).content)
+        assert "5" in status, status
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app._hp_entry is None
+        assert zephyr.hp == hp0 - 5, zephyr.hp
         app.save_screenshot(os.path.join(SHOTS, "02-damage.png"))
+
+        # Esc cancels a half-typed entry without applying it
+        hp1 = zephyr.hp
+        await pilot.press("d", "3")
+        await pilot.pause()
+        assert app._hp_entry is not None
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app._hp_entry is None
+        assert zephyr.hp == hp1, zephyr.hp
+
+        # the newest message renders at the TOP of the battle log
+        newest = app._messages[-1][0]
+        log_lines = str(app.query_one("#log-content", Static).content).splitlines()
+        assert newest in log_lines[0], (newest, log_lines[0])
+
+        # detail card has breathing room after the vitals row and before the note
+        detail = str(app.query_one("#detail", Static).content)
+        assert "\n\n" in detail, detail
 
         # next turn a few times
         for _ in range(4):
@@ -72,7 +192,17 @@ async def main() -> None:
         await pilot.pause()
         app.save_screenshot(os.path.join(SHOTS, "07-monster-added.png"))
         assert len(app.combatants) == before + 1
-        assert any(c.name.startswith("Bandit") for c in app.combatants)
+        bandit = next(c for c in app.combatants if c.name.startswith("Bandit"))
+        assert bandit.init is None
+
+        # r rolls initiative for monsters (d20 + modifier), never for PCs
+        await pilot.press("r")
+        await pilot.pause()
+        assert bandit.init is not None, bandit.init
+        assert all(c.init is None for c in pcs), [c.init for c in pcs]
+        log_txt = str(app.query_one("#log-content", Static).content)
+        assert "rolls" in log_txt, log_txt
+        app.save_screenshot(os.path.join(SHOTS, "17-monster-init.png"))
 
         # help overlay
         await pilot.press("?")
@@ -82,29 +212,37 @@ async def main() -> None:
         await pilot.press("escape")
         await pilot.pause()
 
-        # remove the selected creature (Goblin 2) with confirmation
-        doomed = app._sel.name
+        # remove the Bandit with confirmation
+        app._sel = bandit
+        await pilot.pause()
         await pilot.press("x")
         await pilot.pause()
         app.save_screenshot(os.path.join(SHOTS, "09-remove-confirm.png"))
         await pilot.press("enter")      # confirm the removal
         await pilot.pause()
         app.save_screenshot(os.path.join(SHOTS, "09-removed.png"))
-        assert doomed not in [c.name for c in app.combatants], f"{doomed} should be removed"
+        assert not any(c.name.startswith("Bandit") for c in app.combatants)
 
-        # reset
-        await pilot.press("r")
+        # reset (shift+r): full HP, conditions and initiative cleared, round 1
+        await pilot.press("shift+r")
         await pilot.pause()
+        assert all(c.hp == c.max_hp for c in app.combatants)
+        assert all(not c.conditions for c in app.combatants)
+        assert all(c.init is None for c in app.combatants)
+        assert app.round == 1
         app.save_screenshot(os.path.join(SHOTS, "10-reset.png"))
 
-        # grab the selected token and place it on the map
+        # grab the selected token and place it on the map (down, then right)
         sel = app._sel
         sx, sy = sel.x, sel.y
         await pilot.press("g")          # grab
         await pilot.pause()
         app.save_screenshot(os.path.join(SHOTS, "11-grabbed.png"))
         assert app._moving
-        await pilot.press("right", "down")
+        await pilot.press("down")
+        await pilot.pause()
+        assert (sel.x, sel.y) == (sx, sy + 1), (sel.x, sel.y)
+        await pilot.press("right")
         await pilot.pause()
         assert (sel.x, sel.y) == (sx + 1, sy + 1), (sel.x, sel.y)
         await pilot.press("g")          # drop
@@ -127,19 +265,21 @@ async def main() -> None:
         log_txt = app.query_one("#log-content", Static).content
         assert "moved to" not in str(log_txt) and "placed at" not in str(log_txt)
 
-        # click a token on the map to select it (Goblin 1 at 11,6)
+        # click the moved token on the map to select it (zephyr now at sx-1, sy+1)
         map_widget = app.query_one("#map")
         cell_w = map_widget.cell_w
-        await pilot.click(map_widget, offset=(4 + 11 * cell_w + cell_w // 2, 1 + 6))
+        app._sel = tess
         await pilot.pause()
-        assert app._sel.name == "Goblin 1", app._sel.name
+        await pilot.click(map_widget, offset=(4 + sel.x * cell_w + cell_w // 2, 1 + sel.y))
+        await pilot.pause()
+        assert app._sel.name == "Zephyr", app._sel.name
         app.save_screenshot(os.path.join(SHOTS, "13-click-selected.png"))
 
-        # block: grab Goblin 1 and nudge west — Goblin 2 holds (10,6)
+        # block: grab Zephyr and nudge up — Lyra holds (sx-1, sy)
         await pilot.press("g")
         await pilot.pause()
         hx, hy = app._sel.x, app._sel.y
-        await pilot.press("left")
+        await pilot.press("up")
         await pilot.pause()
         assert (app._sel.x, app._sel.y) == (hx, hy), "occupied cell must block"
         await pilot.press("g")          # drop
@@ -151,10 +291,14 @@ async def main() -> None:
         await pilot.press("d", "3", "enter")
         await pilot.pause()
         assert app._sel.hp == hp0 - 3
-        # battle log records the damage
         log_txt = str(app.query_one("#log-content", Static).content)
-        assert "Goblin 1" in log_txt, log_txt
+        assert "Zephyr" in log_txt, log_txt
         app.save_screenshot(os.path.join(SHOTS, "15-log.png"))
+
+        # map tokens are centered in their cell (3-char label in a 4-wide cell)
+        tmp = Combatant(name="Mog", kind="monster", hp=1, max_hp=1, ac=10)
+        assert app._map_cell(0, 0, [tmp], 4).plain == "Mog ", repr(app._map_cell(0, 0, [tmp], 4).plain)
+        assert app._map_cell(0, 0, [tmp], 3).plain == "Mog", repr(app._map_cell(0, 0, [tmp], 3).plain)
 
         # next turn and watch the ▶ marker move; turn change is logged
         t0 = app._turn
@@ -165,27 +309,27 @@ async def main() -> None:
         assert "Turn →" in log_txt, log_txt
         app.save_screenshot(os.path.join(SHOTS, "16-turn.png"))
 
-        # resolve a guaranteed hit: dent's Longsword vs the first living creature.
-        # a canned RNG forces d20=15 (a solid hit, no crit) then d8=3, so the
-        # damage is deterministic and the assert can't pass vacuously on a miss.
+        # resolve a guaranteed hit: zephyr's Quarterstaff vs the first living
+        # creature. a canned RNG forces d20=15 (a solid hit, no crit) then d6=3,
+        # so the damage is deterministic and the assert can't pass vacuously.
         app._rng = _Seq([15, 3])
-        dent = [c for c in app.combatants if c.kind == "PC"][0]
-        app._sel = dent
+        app._sel = zephyr
         await pilot.pause()
-        targets = [t for t in app.combatants if t.alive and t is not dent]
+        targets = [t for t in app.combatants if t.alive and t is not zephyr]
         target = targets[0]
+        assert target is lyra, target.name  # insertion order: Lyra first
         hp_before = target.hp
         await pilot.press("a")
         await pilot.pause()
         app.save_screenshot(os.path.join(SHOTS, "21-attack-modal.png"))
-        await pilot.press("enter")          # pick first weapon (Longsword)
+        await pilot.press("enter")          # pick first weapon (Quarterstaff)
         await pilot.pause()
         app.save_screenshot(os.path.join(SHOTS, "22-target-modal.png"))
         await pilot.press("enter")          # pick first living target
         await pilot.pause()
         log_txt = str(app.query_one("#log-content", Static).content)
         assert "hit" in log_txt, log_txt
-        assert target.hp == hp_before - 7, (target.hp, hp_before)  # d8=3 + flat +4
+        assert target.hp == hp_before - 2, (target.hp, hp_before)  # d6=3 + flat -1
         app.save_screenshot(os.path.join(SHOTS, "23-attack-resolved.png"))
 
         # undo the attack (hp restored), then redo it (hp applied again).
@@ -202,14 +346,15 @@ async def main() -> None:
         t_redone = [c for c in app.combatants if c.name == target.name][0]
         assert t_redone.hp == hp_after, (t_redone.hp, hp_after)
         app.save_screenshot(os.path.join(SHOTS, "24-undo-redo.png"))
+        zephyr = [c for c in app.combatants if c.name == "Zephyr"][0]
+        lyra = [c for c in app.combatants if c.name == "Lyra"][0]
+        tess = [c for c in app.combatants if c.name == "Tess"][0]
 
         # a miss must not push an undo entry (regression: phantom undo on a
         # no-op attack) — natural 1 always misses
         app._rng = _Seq([1])
         undo_len = len(app._undo)
-        app._sel = [c for c in app.combatants if c.kind == "PC"][0]
-        miss_target = [t for t in app.combatants if t.alive][0]
-        hp_m = miss_target.hp
+        app._sel = zephyr
         await pilot.press("a")
         await pilot.pause()
         await pilot.press("enter")
@@ -217,54 +362,42 @@ async def main() -> None:
         await pilot.press("enter")
         await pilot.pause()
         assert len(app._undo) == undo_len, (len(app._undo), undo_len)
-        assert miss_target.hp == hp_m, (miss_target.hp, hp_m)
+        lyra_now = [c for c in app.combatants if c.name == "Lyra"][0]
+        assert lyra_now.hp == hp_after, (lyra_now.hp, hp_after)
         app._rng = random.Random(7)  # back to a real RNG for the rest of the flow
 
         # save the session to disk, damage a PC, then load it back
-        import app as appmod
-        dent = [c for c in app.combatants if c.kind == "PC"][0]
-        appmod.SAVE_PATH = os.path.join(SHOTS, "encounter-test.json")
+        hp0 = zephyr.hp
         await pilot.press("s")
         await pilot.pause()
         assert os.path.exists(appmod.SAVE_PATH)
-        hp0 = dent.hp
         await pilot.press("d", "5", "enter")
         await pilot.pause()
-        assert dent.hp == hp0 - 5, dent.hp
+        assert zephyr.hp == hp0 - 5, zephyr.hp
         await pilot.press("l")
         await pilot.pause()
-        dent_loaded = [c for c in app.combatants if c.kind == "PC"][0]
-        assert dent_loaded.hp == hp0, dent_loaded.hp
+        zephyr_loaded = [c for c in app.combatants if c.kind == "PC"][0]
+        assert zephyr_loaded.hp == hp0, zephyr_loaded.hp
         os.remove(appmod.SAVE_PATH)
         app.save_screenshot(os.path.join(SHOTS, "25-save-load.png"))
+        zephyr = [c for c in app.combatants if c.name == "Zephyr"][0]
+        lyra = [c for c in app.combatants if c.name == "Lyra"][0]
+        tess = [c for c in app.combatants if c.name == "Tess"][0]
 
         # initiative: AC shows in the init rows
-        dent = [c for c in app.combatants if c.kind == "PC"][0]
-        row_text = str(app._rows[id(dent)].render().plain)
-        assert "AC 22" in row_text, row_text
+        row_text = str(app._rows[id(tess)].render().plain)
+        assert "AC 18" in row_text, row_text
         assert "--" in row_text, row_text  # blank init shows as --
 
-        # o rolls initiative for all monsters (d20 + modifier), never for PCs
-        for m in (c for c in app.combatants if c.kind != "PC"):
-            assert m.init is None
-        await pilot.press("o")
-        await pilot.pause()
-        assert dent.init is None, "PCs are not auto-rolled"
-        monsters = [c for c in app.combatants if c.kind != "PC"]
-        assert all(m.init is not None for m in monsters), [m.init for m in monsters]
-        log_txt = str(app.query_one("#log-content", Static).content)
-        assert "rolls" in log_txt, log_txt
-        app.save_screenshot(os.path.join(SHOTS, "17-monster-init.png"))
-
         # t sets a creature's initiative and auto-sorts to the top
-        app._sel = dent
+        app._sel = lyra
         await pilot.press("t")
         await pilot.pause()
         app.screen.query_one(Input).value = "30"
         await pilot.press("enter")
         await pilot.pause()
-        assert dent.init == 30, dent.init
-        assert app.combatants[0] is dent, [c.name for c in app.combatants]
+        assert lyra.init == 30, lyra.init
+        assert app.combatants[0] is lyra, [c.name for c in app.combatants]
         app.save_screenshot(os.path.join(SHOTS, "18-set-init.png"))
 
         # import a PC from a D&D Beyond URL (network mocked offline)
@@ -272,41 +405,6 @@ async def main() -> None:
         assert parse_ddb_url("9876543") == 9876543
         assert parse_ddb_url("https://example.com/other") is None
 
-        canned = {
-            "name": "Zephyr",
-            "classes": [{"level": 4, "definition": {"name": "Wizard"}}],
-            "race": {"fullName": "Gnome"},
-            "baseHitPoints": 20,
-            "bonusHitPoints": 4,
-            "removedHitPoints": 2,
-            "stats": [
-                {"id": 1, "value": 8},
-                {"id": 2, "value": 14},
-                {"id": 3, "value": 10},
-                {"id": 4, "value": 17},
-                {"id": 5, "value": 10},
-                {"id": 6, "value": 10},
-            ],
-            "inventory": [
-                {
-                    "equipped": True,
-                    "definition": {
-                        "name": "Quarterstaff",
-                        "damage": {"diceString": "1d6", "value": 3},
-                        "damageBonus": 0,
-                        "damageType": "Bludgeoning",
-                        "attackType": 1,
-                    },
-                }
-            ],
-            "spells": {
-                "0": [{"definition": {"name": "Fire Bolt", "level": 0}}],
-                "1": [{"definition": {"name": "Shield", "level": 1}}],
-            },
-            "modifiers": {},
-        }
-        import ddb
-        ddb.fetch_character_data = lambda _cid: canned
         n = len(app.combatants)
         await pilot.press("i")
         await pilot.pause()
@@ -318,18 +416,18 @@ async def main() -> None:
             if len(app.combatants) == n + 1:
                 break
         assert len(app.combatants) == n + 1, len(app.combatants)
-        zephyr = [c for c in app.combatants if c.name == "Zephyr"][0]
-        assert zephyr.kind == "PC" and zephyr.hp == 22 and zephyr.max_hp == 24
-        assert zephyr.ac == 12 and zephyr.role == "Wizard 4"
-        assert zephyr.init is None and zephyr.init_mod == 2
-        assert "STR 8, DEX 14, CON 10, INT 17, WIS 10, CHA 10" in zephyr.note, zephyr.note
-        assert zephyr.attacks and zephyr.attacks[0].startswith("Quarterstaff +1 · 1d6-1"), zephyr.attacks
-        assert "Fire Bolt" in zephyr.spells and "Shield" in zephyr.spells, zephyr.spells
+        nix = [c for c in app.combatants if c.name == "Nix"][0]
+        assert nix.kind == "PC" and nix.hp == 16 and nix.max_hp == 16
+        assert nix.ac == 11 and nix.role == "Cleric 2"
+        assert nix.init is None and nix.init_mod == 1
+        assert nix.attacks and nix.attacks[0].startswith("Warhammer +3 · 1d8+1"), nix.attacks
         log_txt = str(app.query_one("#log-content", Static).content)
-        assert "Imported Zephyr" in log_txt, log_txt
+        assert "Imported Nix" in log_txt, log_txt
         app.save_screenshot(os.path.join(SHOTS, "20-imported.png"))
 
         # edit a name (e -> first field -> type + enter), then undo it
+        app._sel = zephyr
+        await pilot.pause()
         await pilot.press("e")
         await pilot.pause()
         await pilot.press("enter")
@@ -342,56 +440,66 @@ async def main() -> None:
         await pilot.press("u")
         await pilot.pause()
         assert any(c.name == "Zephyr" for c in app.combatants), [c.name for c in app.combatants]
+        zephyr = [c for c in app.combatants if c.name == "Zephyr"][0]
+        lyra = [c for c in app.combatants if c.name == "Lyra"][0]
+        tess = [c for c in app.combatants if c.name == "Tess"][0]
 
         # edit AC (e -> down down -> ac field), then undo it
-        grish = [c for c in app.combatants if c.name == "Grish"][0]
-        app._sel = grish
+        app._sel = tess
         await pilot.press("e")
         await pilot.pause()
         await pilot.press("down", "down", "enter")
         await pilot.pause()
-        app.screen.query_one(Input).value = "18"
+        app.screen.query_one(Input).value = "16"
         await pilot.press("enter")
         await pilot.pause()
-        assert grish.ac == 18, grish.ac
+        assert tess.ac == 16, tess.ac
         app.save_screenshot(os.path.join(SHOTS, "27-edit-ac.png"))
         await pilot.press("u")
         await pilot.pause()
-        grish = [c for c in app.combatants if c.name == "Grish"][0]
-        assert grish.ac == 17, grish.ac
+        tess = [c for c in app.combatants if c.name == "Tess"][0]
+        assert tess.ac == 18, tess.ac
 
         # add a PC from scratch (p -> name -> enter)
         n = len(app.combatants)
         await pilot.press("p")
         await pilot.pause()
-        app.screen.query_one(Input).value = "Lyra"
+        app.screen.query_one(Input).value = "Borin"
         await pilot.press("enter")
         await pilot.pause()
         assert len(app.combatants) == n + 1, len(app.combatants)
-        lyra = [c for c in app.combatants if c.name == "Lyra"][0]
-        assert lyra.kind == "PC" and lyra.ac == 10 and lyra.hp == 10 and lyra.max_hp == 10
-        assert lyra.stats == {1: 10, 2: 10, 3: 10, 4: 10, 5: 10, 6: 10}, lyra.stats
-        assert app._sel is lyra
+        borin = [c for c in app.combatants if c.name == "Borin"][0]
+        assert borin.kind == "PC" and borin.ac == 10 and borin.hp == 10 and borin.max_hp == 10
+        assert app._sel is borin
         app.save_screenshot(os.path.join(SHOTS, "28-add-pc.png"))
 
-        # new blank encounter (ctrl+n -> confirm), then undo/redo it
-        await pilot.press("ctrl+n")
-        await pilot.pause()
-        app.save_screenshot(os.path.join(SHOTS, "29-new-encounter.png"))
+        # campaigns: save the current party as a new campaign (C), then load it
+        await pilot.press("C")
+        await _wait_modal(pilot, ListModal)
+        app.save_screenshot(os.path.join(SHOTS, "31-campaign-menu.png"))
+        await pilot.press("down")       # -> "Save current party as a new campaign"
+        await pilot.press("enter")
+        await _wait_modal(pilot, TextModal)
+        app.screen.query_one(Input).value = "Test Party"
         await pilot.press("enter")
         await pilot.pause()
-        assert len(app.combatants) == 0, len(app.combatants)
-        assert app.round == 1
-        await pilot.press("u")
-        await pilot.pause()
-        assert len(app.combatants) == n + 1, len(app.combatants)
-        await pilot.press("shift+u")
-        await pilot.pause()
-        assert len(app.combatants) == 0, len(app.combatants)
+        with open(appmod.CAMPAIGN_PATH) as f:
+            camps = json.load(f)
+        assert camps["active"] == "Test Party", camps["active"]
+        assert len(camps["campaigns"]["Test Party"]["character_ids"]) == 4
+        assert set(camps["campaigns"]["Test Party"]["character_ids"]) == set(DEFAULT_IDS + [9876543])
+
+        # load the saved campaign back (active campaign is the first menu option)
+        await pilot.press("shift+c")
+        await _wait_modal(pilot, ListModal)
+        await pilot.press("enter")      # -> load: Test Party
+        await _wait_pcs(pilot, 4)
+        assert [c.name for c in app.combatants if c.kind == "PC"] == ["Zephyr", "Lyra", "Tess", "Nix"]
+        app.save_screenshot(os.path.join(SHOTS, "32-campaign-loaded.png"))
 
         # with everyone dead, advancing must still begin a new round — the
         # dead-skip scan wraps the whole list (regression: round never advanced)
-        await pilot.press("r")
+        await pilot.press("shift+r")
         await pilot.pause()
         for c in app.combatants:
             c.hp = 0
@@ -403,6 +511,21 @@ async def main() -> None:
         app._turn = app._sel = None
         app._moving = False
         app._rebuild_rows()
+
+        # new blank encounter (ctrl+n -> confirm), then undo/redo it
+        await pilot.press("ctrl+n")
+        await pilot.pause()
+        app.save_screenshot(os.path.join(SHOTS, "29-new-encounter.png"))
+        await pilot.press("enter")
+        await pilot.pause()
+        assert len(app.combatants) == 0, len(app.combatants)
+        assert app.round == 1
+        await pilot.press("u")
+        await pilot.pause()
+        assert len(app.combatants) == 4, len(app.combatants)
+        await pilot.press("shift+u")
+        await pilot.pause()
+        assert len(app.combatants) == 0, len(app.combatants)
 
         # monster library browser (b): type a filter, Enter adds the match
         await pilot.press("b")
@@ -419,6 +542,10 @@ async def main() -> None:
         await pilot.press("u")
         await pilot.pause()
         assert len(app.combatants) == 0, len(app.combatants)
+
+        for p in (appmod.CAMPAIGN_PATH,):
+            if os.path.exists(p):
+                os.remove(p)
 
         print("SMOKE OK")
 

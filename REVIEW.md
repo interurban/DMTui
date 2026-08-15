@@ -192,3 +192,87 @@ lines roll the dice expression N times. Covered by four new unit tests.
   spell slots are out of scope for this tracker.
 - **`_number_flow` rejections** (e.g. damage 0) log a warning; the user can
   retry or Esc out.
+## Round 3 + UX pass — findings & fixes (current session)
+
+### Critical
+
+- None.
+
+### Major
+
+### E1. Inline damage/heal entry (no popup)
+`app.py` — pressing `d` or `h` arms a number-entry mode; digits appear in the
+initiative status row (e.g. `DAMAGE 12 → Dent`), Enter applies the signed amount,
+Esc cancels, Backspace edits. Replaces the old `_run_number`/`_make_number_modal`/
+`_number_flow` flow that pushed a `NumberModal` screen. Regression:
+`test_resolve_spell_regenerate_without_hp`, `test_resolve_damage_spell_mentioning_hp_is_not_heal`,
+`test_resolve_spell_zero_darts_not_multiplied`, `test_resolve_crit_multi_die_no_bonus`.
+
+### E2. Enter = attack (not auto-apply)
+The `Enter` key opens the attack-with list (same as pressing `a`); in inline
+entry mode `Enter` applies the typed number. This avoids the ambiguity of "Enter
+same as next" and matches the user's explicit choice.
+
+### E3. `r` = roll init, `shift+r` = reset
+The `r` key now rolls monster initiative (replacing the removed `o` binding).
+`shift+r` resets the encounter to round 1 (full HP, cleared conditions and inits).
+The old `r` = reset (demo purpose) is removed.
+
+### E4. Detail card spacing
+Added blank lines after the AC/vitals row, after the Skills row, and before the
+combatant note ("his voice crackles...") in `_detail_markup`, improving visual
+breathing room.
+
+### E5. Map tokens centered in cells
+`_map_cell` now centers the token glyph (marker + label) in the cell using
+auto-padding. Labels are capped at 3 characters via `short_label()`. A 3-char
+label in a 4-wide cell is centered (e.g. `"Lyr "`).
+
+### E6. Battle log flip + help hint removed
+`_log_text` renders messages newest-on-top (reversed `_messages`). `_refresh_log`
+uses `scroll_home` instead of `scroll_end`. `_log_status_text` drops the `? help`
+hint; the binding `?` still opens `HelpModal`.
+
+### E7. Modal centering + sizing
+`ModalScreen` alignment changed from `center top`/`padding-top: 3` to `center
+middle`, eliminating the visual "push-down" of the background UI. `.modal-box`
+width 57 (50% wider), `#modal-list` height 15 (~20% deeper). HelpModal keys text
+updated to reflect new bindings.
+
+### E8. Campaign system
+- **Default D&D Beyond URLs**: `91566422`, `112516506`, `90060446` seeded as
+  "My Campaign", set active on first run.
+- **`campaigns.json`** (`gitignored`) schema: `{"active": str, "campaigns": {name: {"character_ids": [int,...]}}}`.
+- **Boot** loads the active campaign, importing PCs best-effort (placeholder
+  `Char <id>` on fetch failure), placing them top-left on the map. If no saved
+  campaign exists, the default "My Campaign" is created and set active.
+- **`C` key** opens a campaign menu: `load` (loads a saved campaign), `save`
+  (saves current party's imported PCs as a new campaign with a name), `blank`
+  (starts a fresh encounter). The app remembers the last active campaign.
+- **`shift+c`** triggers the campaign menu.
+- **`_place_pc`** places imported PCs at deterministic top-left positions,
+  independent of the mutable `MAP_COLS` global, ensuring stable positioning
+  even while the layout settles during boot.
+
+### Minor
+
+- **`_restore` atomic round coercion** — `round` is coerced to `int` before
+  mutating `self.combatants`, so a corrupt save fails atomically instead of
+  leaving a half-restored state.
+- **Tests**: 10 regression tests added (spell regenerate without HP, inflict-
+  wounds-not-heal, zero-darts not multiplied, crit multi-die no-bonus, JSON/HTTP/
+  invalid-UTF-8 wrap, explicit attackBonus 0 trusted, heavy armor ignores
+  negative DEX, hit-dice non-numeric keys filtered). Tests went from 32 → 41 → 51.
+- **`ctrl+p` palette binding** now maps to `command_palette`.
+
+### Deliberately not changed
+
+- **`_restore` turn-replica on `keep_nav`** — duplicate PC names resolve to the
+  first match; risk is a silent turn jump, never a crash.
+- **`action_load` / `_restore`** — `restore_nav` flag still distinguishes world-
+  replacing ops from plain mutations.
+- **`_detail_markup`** — note placement and formatting unchanged beyond the
+  added blank lines.
+- **`find_free_spot`** — top-right scan preserves existing spawn/add behavior.
+- **`_number_flow` / `_make_number_modal`** — removed from `app.py` but the
+  `NumberModal` class in `modals.py` remains available for other uses.

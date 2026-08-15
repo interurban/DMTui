@@ -32,7 +32,6 @@ from battle import (
     MAP_COLS,
     MAP_ROWS,
     Combatant,
-    build_encounter,
     coord_name,
     encounter_monster,
     find_free_spot,
@@ -45,6 +44,10 @@ from modals import HelpModal, ImportingModal, ListModal, MonsterBrowser, NumberM
 from widgets import CombatantRow, InitiativeList, LEFT_W, LogView, MapGrid
 
 SAVE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "encounter.json")
+CAMPAIGN_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "campaigns.json")
+
+DEFAULT_CAMPAIGN = "My Campaign"
+DEFAULT_CHARACTER_IDS = [91566422, 112516506, 90060446]
 
 
 def _parse_coord(s: str) -> tuple[int, int] | None:
@@ -154,10 +157,10 @@ class BattleApp(App[None]):
         color: #c9d3e0;
     }
 
-    ModalScreen { align: center top; padding-top: 3; background: rgba(8, 10, 14, 0.75); }
+    ModalScreen { align: center middle; background: rgba(8, 10, 14, 0.75); }
     .modal-title { text-style: bold; color: #e6ebf2; margin-bottom: 1; }
-    .modal-box { width: 38; height: auto; border: thick #4a5b7a; background: #1b2029; padding: 1 2; }
-    #modal-list { height: 12; border: round #2a3446; margin-top: 1; }
+    .modal-box { width: 57; max-width: 92%; height: auto; border: thick #4a5b7a; background: #1b2029; padding: 1 2; }
+    #modal-list { height: 15; border: round #2a3446; margin-top: 1; }
     .modal-item { padding: 0 1; color: #c9d3e0; }
     ListView:focus .modal-item { background: #2f3f5c; color: #ffffff; }
     .modal-hint { margin-top: 1; color: #8a93a3; }
@@ -171,13 +174,27 @@ class BattleApp(App[None]):
         Binding("left", "arrow_left", "-HP"),
         Binding("right", "arrow_right", "+HP"),
         Binding("g", "grab", "Grab"),
-        Binding("n, enter", "next_turn", "Next turn"),
-        Binding("o", "roll_monster_init", "Monster init"),
+        Binding("n", "next_turn", "Next turn"),
+        Binding("enter", "attack", "Attack"),
+        Binding("r", "roll_monster_init", "Monster init"),
+        Binding("shift+r", "reset", "Reset"),
         Binding("t", "set_init", "Set init"),
         Binding("d", "damage", "Damage"),
         Binding("h", "heal", "Heal"),
         Binding("a", "attack", "Attack"),
+        Binding("0", "hp_digit(0)", "0"),
+        Binding("1", "hp_digit(1)", "1"),
+        Binding("2", "hp_digit(2)", "2"),
+        Binding("3", "hp_digit(3)", "3"),
+        Binding("4", "hp_digit(4)", "4"),
+        Binding("5", "hp_digit(5)", "5"),
+        Binding("6", "hp_digit(6)", "6"),
+        Binding("7", "hp_digit(7)", "7"),
+        Binding("8", "hp_digit(8)", "8"),
+        Binding("9", "hp_digit(9)", "9"),
+        Binding("backspace", "hp_backspace", "Backspace"),
         Binding("c", "condition", "Condition"),
+        Binding("C", "campaign", "Campaign"),
         Binding("m", "monster", "Monster"),
         Binding("b", "browse", "Monster lib"),
         Binding("i", "import_pc", "Import PC"),
@@ -186,7 +203,6 @@ class BattleApp(App[None]):
         Binding("p", "add_pc", "Add PC"),
         Binding("ctrl+n", "new_encounter", "New encounter"),
         Binding("x", "remove", "Remove"),
-        Binding("r", "reset", "Reset"),
         Binding("plus", "heal_one", "+1"),
         Binding("minus", "damage_one", "-1"),
         Binding("question_mark", "help", "Help"),
@@ -212,6 +228,8 @@ class BattleApp(App[None]):
         self._rng = random.Random()
         self._undo: list[dict] = []
         self._redo: list[dict] = []
+        self._hp_entry: str | None = None
+        self._hp_sign: int = 1
         self._setup()
 
     # -- lifecycle ---------------------------------------------------------
@@ -251,18 +269,180 @@ class BattleApp(App[None]):
         self._refresh_all()
         self.call_after_refresh(self._refresh_all)
         self.call_after_refresh(self._scroll_to_selected)
+        self.run_worker(self._boot_campaign())
 
     def _setup(self) -> None:
-        self.combatants = build_encounter()
+        self.combatants = []
         self.round = 1
-        self._turn = self.combatants[0]
-        self._sel = self.combatants[0]
+        self._turn = None
+        self._sel = None
         self._moving = False
-        self._messages = [("Encounter set. Round 1 — high initiative acts first.", "info", True)]
+        self._messages = []
 
     def _reset_encounter(self) -> None:
-        self._setup()
+        for c in self.combatants:
+            c.hp = c.max_hp
+            c.conditions.clear()
+            c.init = None
+        self.round = 1
+        self._turn = next((c for c in self.combatants if c.kind == "PC"), self.combatants[0] if self.combatants else None)
+        self._sel = self._turn
+        self._moving = False
         self._rebuild_rows()
+
+    # -- campaigns -----------------------------------------------------------
+
+    def _campaigns_read(self) -> dict:
+        try:
+            with open(CAMPAIGN_PATH) as f:
+                data = json.load(f)
+            if isinstance(data, dict) and isinstance(data.get("campaigns"), dict):
+                return data
+        except (OSError, ValueError):
+            pass
+        data = {
+            "active": DEFAULT_CAMPAIGN,
+            "campaigns": {DEFAULT_CAMPAIGN: {"character_ids": list(DEFAULT_CHARACTER_IDS)}},
+        }
+        try:
+            self._campaigns_write(data)
+        except OSError:
+            pass
+        return data
+
+    def _campaigns_write(self, data: dict) -> None:
+        with open(CAMPAIGN_PATH, "w") as f:
+            json.dump(data, f, indent=2)
+
+    def _campaign_ids(self, name: str, data: dict) -> list[int]:
+        camp = data.get("campaigns", {}).get(name)
+        if not isinstance(camp, dict):
+            return []
+        ids = camp.get("character_ids") or []
+        return [int(x) for x in ids if isinstance(x, int) or str(x).isdigit()]
+
+    def _set_active_campaign(self, name: str) -> None:
+        try:
+            data = self._campaigns_read()
+            if name in data.get("campaigns", {}):
+                data["active"] = name
+                self._campaigns_write(data)
+        except OSError:
+            pass
+
+    async def _fetch_combatant(self, cid: int) -> Combatant | None:
+        """Fetch and parse a D&D Beyond character; None when it can't be read."""
+        data = await asyncio.to_thread(ddb.fetch_character_data, cid)
+        pc = ddb.extract_combatant(cid, data)
+        if pc.name == f"Char {cid}":
+            return None
+        pc.ddb_id = cid
+        return pc
+
+    def _placeholder_pc(self, cid: int) -> Combatant:
+        return Combatant(
+            name=f"Char {cid}", kind="PC", hp=10, max_hp=10, ac=10, init_mod=0,
+            role="Unimported",
+            note="D&D Beyond import pending — make the character public to import.",
+            x=0, y=0, stats={i: 10 for i in range(1, 7)}, ddb_id=cid,
+        )
+
+    def _place_pc(self, pc: Combatant) -> bool:
+        """Place a PC on a free cell scanning from the top-left. Independent of
+        the live MAP_COLS/MAP_ROWS globals so boot placement is stable even
+        while the layout is still settling."""
+        occupied = {(c.x, c.y) for c in self.combatants}
+        for y in range(60):
+            for x in range(60):
+                if (x, y) not in occupied:
+                    pc.x, pc.y = x, y
+                    return True
+        return False
+
+    async def _import_campaign(self, name: str) -> int:
+        ids = self._campaign_ids(name, self._campaigns_read())
+        modal = ImportingModal()
+        self.push_screen(modal)
+        placed = 0
+        try:
+            for cid in ids:
+                try:
+                    pc = await self._fetch_combatant(cid)
+                except Exception:
+                    pc = None
+                if pc is None:
+                    pc = self._placeholder_pc(cid)
+                if not self._place_pc(pc):
+                    break
+                self.combatants.append(pc)
+                placed += 1
+        finally:
+            modal.dismiss()
+        self._set_active_campaign(name)
+        return placed
+
+    async def _boot_campaign(self) -> None:
+        data = self._campaigns_read()
+        name = data.get("active") or DEFAULT_CAMPAIGN
+        placed = await self._import_campaign(name)
+        self.round = 1
+        self._turn = self.combatants[0] if self.combatants else None
+        self._sel = self.combatants[0] if self.combatants else None
+        self._sort_combatants()
+        if placed:
+            self._log(f"Campaign '{name}' loaded — {placed} PC{'s' if placed != 1 else ''} at the ready.", kind="import")
+        else:
+            self._log(f"Campaign '{name}' has no characters yet — press [bold]p[/] to add or [bold]i[/] to import.", kind="info")
+
+    def action_campaign(self) -> None:
+        self.run_worker(self._campaign_flow())
+
+    async def _campaign_flow(self) -> None:
+        data = self._campaigns_read()
+        active = data.get("active")
+        options = []
+        for name, camp in sorted(data.get("campaigns", {}).items(), key=lambda kv: (kv[0] != active, kv[0])):
+            n = len(camp.get("character_ids", [])) if isinstance(camp, dict) else 0
+            mark = "  [green]✓[/]" if name == active else ""
+            options.append((f"load:{name}", f"[bold #a8d0ff]LOAD[/] {name}{mark}  [dim]({n} PC{'s' if n != 1 else ''})[/]"))
+        options.append(("save", "Save current party as a new campaign"))
+        options.append(("blank", "[bold #d95841]Start a blank encounter[/]"))
+        picked = await self.push_screen(ListModal("CAMPAIGNS", options), wait_for_dismiss=True)
+        if not picked:
+            return
+        if picked.startswith("load:"):
+            await self._load_campaign_flow(picked[5:])
+        elif picked == "save":
+            await self._save_campaign_flow()
+        elif picked == "blank":
+            self.action_new_encounter()
+
+    async def _load_campaign_flow(self, name: str) -> None:
+        self._push_undo(restore_nav=True)
+        self.combatants = []
+        self._moving = False
+        placed = await self._import_campaign(name)
+        self.round = 1
+        self._turn = self.combatants[0] if self.combatants else None
+        self._sel = self.combatants[0] if self.combatants else None
+        self._sort_combatants()
+        self._log(f"Campaign '{name}' loaded — {placed} PC{'s' if placed != 1 else ''}.", kind="import")
+        self._rebuild_rows()
+
+    async def _save_campaign_flow(self) -> None:
+        name = await self.push_screen(
+            TextModal("SAVE CAMPAIGN", "campaign name (e.g. My Campaign)", confirm="Save"),
+            wait_for_dismiss=True,
+        )
+        if not name:
+            return
+        ids = [c.ddb_id for c in self.combatants if c.ddb_id]
+        data = self._campaigns_read()
+        data.setdefault("campaigns", {})
+        data["campaigns"][name] = {"character_ids": ids}
+        data["active"] = name
+        self._campaigns_write(data)
+        self._log(f"Campaign '{name}' saved — {len(ids)} character{'s' if len(ids) != 1 else ''}.", kind="import")
 
     # -- undo / redo / persistence ------------------------------------------
 
@@ -274,7 +454,7 @@ class BattleApp(App[None]):
             "stats": dict(c.stats), "saves": sorted(c.saves), "speed": c.speed,
             "proficiency": c.proficiency, "hit_dice": c.hit_dice, "skills": dict(c.skills),
             "passive_perception": c.passive_perception, "attacks": list(c.attacks),
-            "traits": list(c.traits), "spells": list(c.spells),
+            "traits": list(c.traits), "spells": list(c.spells), "ddb_id": c.ddb_id,
         }
 
     def _snapshot(self) -> dict:
@@ -308,9 +488,17 @@ class BattleApp(App[None]):
                 # backfill so a hand-edited save never yields a None mod (detail card crash)
                 c.stats = {i: 10 for i in range(1, 7)}
             new_combatants.append(c)
-        self.combatants = new_combatants
         n = len(new_combatants)
+        # coerce every field that feeds the mutation below BEFORE touching
+        # self.combatants, so a corrupt save fails atomically instead of
+        # leaving us half-restored (round swap done, nav stale, save bricked)
+        try:
+            round_val = int(snap.get("round", 1))
+        except (TypeError, ValueError):
+            round_val = 1
         sel_i = snap.get("sel")
+        turn_i = snap.get("turn")
+        self.combatants = new_combatants
         self._sel = new_combatants[sel_i] if n and isinstance(sel_i, int) and 0 <= sel_i < n else None
         if keep_nav:
             # undo/redo revert combatant state, NOT navigation: keep the current
@@ -322,8 +510,7 @@ class BattleApp(App[None]):
             )
             self._moving = bool(snap.get("moving", False))
         else:
-            self.round = int(snap.get("round", 1))
-            turn_i = snap.get("turn")
+            self.round = round_val
             self._turn = (
                 new_combatants[turn_i]
                 if n and isinstance(turn_i, int) and 0 <= turn_i < n
@@ -473,6 +660,7 @@ class BattleApp(App[None]):
             vitals.append(f"[bold]PP[/] [bold #6aa6d9]{c.passive_perception}[/]")
         vitals.append(f"[bold]STATUS[/] {status}")
         lines.append("  ".join(vitals))
+        lines.append("")
 
         if c.stats:
             for r in range(2):
@@ -492,6 +680,7 @@ class BattleApp(App[None]):
         if c.skills:
             sk = "  ".join(f"[bold]{k.capitalize()}[/] {v:+d}" for k, v in sorted(c.skills.items()))
             lines.append(f"[bold]SKILLS[/]  {sk}")
+            lines.append("")
         if c.attacks:
             for atk in c.attacks:
                 lines.append(f"[bold #e89a4f]⚔[/] {atk}")
@@ -505,6 +694,7 @@ class BattleApp(App[None]):
             conds = "  ".join(f"[{CONDITIONS[cn]['color']}]{CONDITIONS[cn]['glyph']} {cn}[/]" for cn in sorted(c.conditions))
             lines.append(f"[bold]CONDITIONS[/]  {conds}")
         if c.note:
+            lines.append("")
             lines.append(f"[dim]{c.note}[/]")
         return "\n".join(lines)
 
@@ -512,12 +702,12 @@ class BattleApp(App[None]):
         content = self.query_one("#log-content", Static)
         content.update(self._log_text())
         if self._log_view is not None:
-            self._log_view.scroll_end(animate=False)
+            self._log_view.scroll_home(animate=False)
 
     def _log_text(self) -> str:
         lines = [
             f"[{LOG_COLORS.get(kind, '#c9d3e0')}]{text}[/]"
-            for text, kind, in_log in self._messages
+            for text, kind, in_log in reversed(self._messages)
             if in_log
         ]
         if not lines:
@@ -546,11 +736,20 @@ class BattleApp(App[None]):
         return f"{sel_s}   ·   {hint_text}"
 
     def _init_status_text(self) -> str:
-        return "  ·  ".join([hint("↑↓", "select"), hint("n", "next"), hint("o", "roll init"), hint("t", "set init")])
+        if self._hp_entry is not None and self._sel is not None:
+            label = "DAMAGE" if self._hp_sign < 0 else "HEAL"
+            color = "#e05a5a" if self._hp_sign < 0 else "#3fae6a"
+            entry = self._hp_entry or "?"
+            return (
+                f"[bold {color}]{label}[/] [bold #e6ebf2]{entry}[/] → "
+                f"[bold #ffffff]{self._sel.name}[/]   ·   "
+                "[bold #e6ebf2]Enter[/] apply · [bold #e6ebf2]Esc[/] cancel"
+            )
+        return "  ·  ".join([hint("↑↓", "select"), hint("n", "next"), hint("r", "roll init"), hint("t", "set init")])
 
     def _log_status_text(self) -> str:
         return "  ·  ".join(
-            [hint("r", "reset"), hint("s", "save"), hint("l", "load"), hint("u", "undo"), hint("?", "help"), hint("q", "quit")]
+            [hint("shift+r", "reset"), hint("s", "save"), hint("l", "load"), hint("u", "undo"), hint("q", "quit")]
         )
 
     def _detail_status_text(self) -> str:
@@ -584,14 +783,13 @@ class BattleApp(App[None]):
         active = c is self._turn
         sel = c is self._sel
         down = not c.alive
-        cap = cell_w - 1
 
         if active:
-            body, fg, bg, bold = "▶" + label[:cap], "#16130a", "#c9a227", True
+            token, fg, bg, bold = "▶" + label, "#16130a", "#c9a227", True
         elif down:
-            body, fg, bg, bold = "✝" + label[:cap], "#5b6471", "#20242c", False
+            token, fg, bg, bold = "✝" + label, "#5b6471", "#20242c", False
         else:
-            body, fg, bg, bold = " " + label[:cap], "#d7e9ff", "#2a4a6a", False
+            token, fg, bg, bold = label, "#d7e9ff", "#2a4a6a", False
             if c.kind != "PC":
                 fg, bg = "#ffd9d9", "#5a2f2f"
 
@@ -601,8 +799,13 @@ class BattleApp(App[None]):
             bg = "#3f6a96" if c.kind == "PC" else "#8a4a4a"
             bold = True
 
+        token = token[:cell_w]
+        pad = cell_w - len(token)
+        if pad > 0:
+            token = " " * (pad // 2) + token + " " * (pad - pad // 2)
+
         style = f"bold {fg} on {bg}" if bold else f"{fg} on {bg}"
-        return Text(body.ljust(cell_w), style=style)
+        return Text(token, style=style)
 
     def _move_token(self, dx: int, dy: int) -> None:
         sel = self._sel
@@ -672,6 +875,10 @@ class BattleApp(App[None]):
         self._refresh_all()
 
     def action_release(self) -> None:
+        if self._hp_entry is not None:
+            self._hp_entry = None
+            self._refresh_all()
+            return
         if self._moving and self._sel is not None:
             self._moving = False
             self._refresh_all()
@@ -757,12 +964,46 @@ class BattleApp(App[None]):
     # -- damage / heal -------------------------------------------------------
 
     def action_damage(self) -> None:
-        if self._sel is not None:
-            self._run_number("Damage", self._sel)
+        if self._sel is None:
+            return
+        self._hp_sign = -1
+        self._hp_entry = self._hp_entry or ""
+        self._refresh_all()
 
     def action_heal(self) -> None:
-        if self._sel is not None:
-            self._run_number("Heal", self._sel)
+        if self._sel is None:
+            return
+        self._hp_sign = 1
+        self._hp_entry = self._hp_entry or ""
+        self._refresh_all()
+
+    def action_hp_digit(self, digit: int) -> None:
+        if self._hp_entry is None or self._sel is None:
+            return
+        if len(self._hp_entry) < 4:
+            self._hp_entry += str(digit)
+            self._refresh_all()
+
+    def action_hp_backspace(self) -> None:
+        if self._hp_entry is None:
+            return
+        self._hp_entry = self._hp_entry[:-1]
+        if not self._hp_entry:
+            self._hp_entry = None
+        self._refresh_all()
+
+    def _finish_hp_entry(self) -> None:
+        if self._hp_entry is None or self._sel is None:
+            return
+        entry, self._hp_entry = self._hp_entry, None
+        if not entry:
+            self._refresh_all()
+            return
+        amount = self._hp_sign * int(entry)
+        if amount == 0:
+            self._log("Damage/heal amount must be a positive number.", kind="warn")
+        else:
+            self._apply_hp(self._sel, amount)
 
     def action_damage_one(self) -> None:
         if self._sel is not None:
@@ -771,25 +1012,6 @@ class BattleApp(App[None]):
     def action_heal_one(self) -> None:
         if self._sel is not None:
             self._apply_hp(self._sel, 1)
-
-    def _run_number(self, title: str, target: Combatant) -> None:
-        self.run_worker(self._number_flow(title, target))
-
-    def _make_number_modal(self, title: str, target: Combatant) -> NumberModal:
-        ph = "damage amount" if title == "Damage" else "heal amount"
-        return NumberModal(title, target.name, ph)
-
-    async def _number_flow(self, title: str, target: Combatant) -> None:
-        amount = await self.push_screen(self._make_number_modal(title, target), wait_for_dismiss=True)
-        if amount is None:
-            return
-        if amount <= 0:
-            self._log(f"{title} amount must be a positive number.", kind="warn")
-            return
-        if title == "Heal":
-            self._apply_hp(target, amount)
-        else:
-            self._apply_hp(target, -amount)
 
     def _apply_hp(self, c: Combatant, delta: int) -> None:
         if delta == 0:
@@ -823,6 +1045,9 @@ class BattleApp(App[None]):
     # -- attack resolution -----------------------------------------------------
 
     def action_attack(self) -> None:
+        if self._hp_entry is not None:
+            self._finish_hp_entry()
+            return
         if self._sel is not None:
             self.run_worker(self._attack_flow())
 
@@ -866,12 +1091,13 @@ class BattleApp(App[None]):
                 head + f"[bold #3fae6a]hit[/] for [bold #e05a5a]{res['damage']} damage[/] ({parts}){crit}",
                 kind="damage",
             )
-            self._push_undo()
-            was_alive = target.alive
-            target.hp = max(0, min(target.max_hp, target.hp - res["damage"]))
-            if was_alive and not target.alive:
-                target.conditions.discard("concentrating")
-                self._log(self._rng.choice(DEATH_LINES).format(name=target.name), kind="death")
+            if res["damage"] > 0:
+                self._push_undo()
+                was_alive = target.alive
+                target.hp = max(0, min(target.max_hp, target.hp - res["damage"]))
+                if was_alive and not target.alive:
+                    target.conditions.discard("concentrating")
+                    self._log(self._rng.choice(DEATH_LINES).format(name=target.name), kind="death")
             self._refresh_all()
             return
         # spell
@@ -992,6 +1218,7 @@ class BattleApp(App[None]):
                 kind="warn",
             )
             return
+        pc.ddb_id = cid
         spot = find_free_spot(self.combatants, MAP_COLS, MAP_ROWS)
         if spot is None:
             self._log("Battle map is full — import skipped.", kind="warn")
@@ -1075,7 +1302,7 @@ class BattleApp(App[None]):
         self._push_undo()
         self.combatants.append(mob)
         self._sort_combatants()
-        self._log(f"{n} joins the fight at {coord_name(x, y)} — press [bold]o[/] to roll its initiative.", kind="monster")
+        self._log(f"{n} joins the fight at {coord_name(x, y)} — press [bold]r[/] to roll its initiative.", kind="monster")
 
     def action_remove(self) -> None:
         if self._sel is not None:

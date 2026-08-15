@@ -136,3 +136,24 @@ Made the stat blocks real instead of decorative:
 - No planned sprints — the tool is feature-complete. Ideas if it grows again:
   monster stat blocks in the detail card, condition-tied map colours,
   turn timer / encounter notes.
+## Round 3 + UX pass (complete)
+
+- **Inline damage/heal entry** — `d`/`h` arms entry; digits in status row; Enter applies, Esc cancels, Backspace edits. Replaces `_run_number`/`_make_number_modal`/`_number_flow`. Regression tests: `test_resolve_spell_regenerate_without_hp`, `test_resolve_damage_spell_mentioning_hp_is_not_heal`, `test_resolve_spell_zero_darts_not_multiplied`, `test_resolve_crit_multi_die_no_bonus`.
+
+- **Enter = attack** — Opens attack-with list (same as `a`); in entry mode applies the number.
+
+- **`r` = roll init, `shift+r` = reset** — `r` rolls monster initiative; `shift+r` resets HP/conditions/inits to round 1. Old `r` = reset removed.
+
+- **Detail card spacing** — blank lines after AC/vitals row, after Skills row, before note.
+
+- **Map tokens centered** — `_map_cell` centers glyph in cell; `short_label` caps at 3 chars.
+
+- **Battle log flip + help hint removed** — `_log_text` newest-on-top; `_refresh_log` `scroll_home`; `_log_status_text` drops `? help`.
+
+- **Modal centering + sizing** — `ModalScreen` `center middle`; `.modal-box` width 57; `#modal-list` height 15; HelpModal keys updated.
+
+- **Campaign system** — default "My Campaign" seeded with `[91566422, 112516506, 90060446]`; `campaigns.json` `gitignored`; `C` key opens menu (load/save/blank); app remembers last active campaign.
+
+- **Tests**: 10 regression tests added; total 51 pass.
+
+- **`ctrl+p`** now maps to `command_palette`.

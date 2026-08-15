@@ -41,6 +41,7 @@ documents both staff code-review passes and every fix that came out of them.
 | `u` / `Shift+u` | undo / redo |
 | `s` / `l` | save / load the encounter to `encounter.json` |
 | `Ctrl+n` | new blank encounter |
+| `Ctrl+p` | command palette |
 | `q` / `?` | quit / help |
 
 ## Attacks & spells

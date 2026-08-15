@@ -188,6 +188,40 @@ def test_resolve_spell_times_not_multiplied():
     assert res["damage"] == 3 and res["dice"] == [2]
 
 
+def test_resolve_spell_regenerate_without_hp():
+    atk, tgt = dent(), hobgoblin()
+    # 'Regenerate' is caught by its own keyword — not by a trailing 'HP' token
+    # (regression: the heal regex matched 'regains' but not 'Regenerate', and
+    # only the 'HP' suffix was masking it in the tests)
+    res = resolve_attack(atk, "Regenerate — 4d8 (Con DC 12)", tgt, Seq([1, 2, 3, 4, 20]))
+    assert res["kind"] == "spell" and res["heal"] is True
+    assert res["damage"] == 10 and res.get("save") is None
+
+
+def test_resolve_damage_spell_mentioning_hp_is_not_heal():
+    atk, tgt = dent(), hobgoblin()
+    # a damage spell whose description happens to mention 'hp' must not flip
+    # into a heal (regression: the bare 'hp'/'hit points' tokens did)
+    res = resolve_attack(atk, "Inflict Wounds — 2d8 necrotic, reduces max hp", tgt, Seq([5, 6]))
+    assert res["kind"] == "spell" and res["heal"] is False
+    assert res["damage"] == 11
+
+
+def test_resolve_spell_zero_darts_not_multiplied():
+    atk, tgt = dent(), hobgoblin()
+    res = resolve_attack(atk, "Magic Missile — 0 darts, 1d4+1 force each", tgt, Seq([2]))
+    assert res["kind"] == "spell" and not res["heal"]
+    assert res["damage"] == 3 and res["dice"] == [2]
+
+
+def test_resolve_crit_multi_die_no_bonus():
+    atk, tgt = dent(), hobgoblin()
+    # '2d6' with no flat bonus — the crit re-roll must still strip '+0'/nothing
+    res = resolve_attack(atk, "Maul +5 · 2d6 bl", tgt, Seq([20, 2, 3, 4, 1]))
+    assert res["crit"] and res["damage"] == 2 + 3 + 4 + 1 == 10
+    assert res["dice"] == [2, 3, 4, 1] and res["dice_bonus"] == 0
+
+
 def test_short_label():
     assert short_label("Goblin 2") == "G2"
     assert short_label("Syrva") == "Syr"
@@ -491,6 +525,55 @@ def test_extract_combatant_damage_bonus_not_double_counted_to_hit():
     assert c.attacks[0].startswith("Greataxe +5 · 1d12+6"), c.attacks
 
 
+def test_extract_combatant_explicit_zero_attack_bonus_trusted():
+    data = {
+        "character": {
+            "name": "Weird",
+            "stats": {"1": 16, "2": 10, "3": 10, "4": 10, "5": 10, "6": 10},
+            "baseHitPoints": 10,
+            "proficiencyBonus": 2,
+            "inventory": [
+                {"equipped": True, "definition": {
+                    "name": "Weapon", "damage": {"diceString": "1d6"}, "damageType": "Bludgeoning",
+                    "attackBonus": 0,
+                }},
+            ],
+            "modifiers": {},
+        }
+    }
+    c = extract_combatant(9, data)
+    assert c.attacks[0].startswith("Weapon +0 · 1d6"), c.attacks
+
+
+def test_extract_combatant_heavy_armor_ignores_negative_dex():
+    data = {
+        "character": {
+            "name": "Plod",
+            "stats": {"1": 10, "2": 6, "3": 10, "4": 10, "5": 10, "6": 10},
+            "baseHitPoints": 10,
+            "inventory": [
+                {"equipped": True, "definition": {"name": "Plate", "armorClass": 18, "armorTypeId": 3}},
+            ],
+            "modifiers": {},
+        }
+    }
+    c = extract_combatant(9, data)
+    assert c.ac == 18, c.ac  # heavy armour ignores DEX entirely, even a -2 penalty
+
+
+def test_extract_combatant_hit_dice_non_numeric_keys_filtered():
+    data = {
+        "character": {
+            "name": "Dicey",
+            "stats": {"1": 10, "2": 10, "3": 10, "4": 10, "5": 10, "6": 10},
+            "hitPointDice": {"8": 3, "6": 2, "foo": 2, "d10": 1},
+            "modifiers": {},
+        }
+    }
+    c = extract_combatant(4, data)
+    assert c.hit_dice == "3d8, 2d6"
+
+
 def test_extract_combatant_negative_removed_hp_clamped():
     data = {
         "character": {
@@ -514,6 +597,55 @@ def test_fetch_character_data_network_error_raises_value_error():
             assert "reach" in str(exc)
         else:
             raise AssertionError("URLError should be wrapped in ValueError")
+
+
+class _Resp:
+    """Minimal urllib response stand-in for fetch tests."""
+
+    def __init__(self, body: bytes):
+        self._b = body
+
+    def read(self):
+        return self._b
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def test_fetch_character_data_non_json_body_wrapped():
+    with mock.patch.object(urllib.request, "urlopen", return_value=_Resp(b"<html>oops</html>")):
+        try:
+            fetch_character_data(999999)
+        except ValueError as exc:
+            assert "non-JSON body" in str(exc)
+        else:
+            raise AssertionError("a non-JSON 200 body should be wrapped in ValueError")
+
+
+def test_fetch_character_data_http_error_non_json_body():
+    import io
+
+    err = urllib.error.HTTPError("http://x", 404, "Not Found", {}, io.BytesIO(b"<html>oops</html>"))
+    with mock.patch.object(urllib.request, "urlopen", side_effect=err):
+        try:
+            fetch_character_data(999999)
+        except ValueError as exc:
+            assert "404" in str(exc)
+        else:
+            raise AssertionError("HTTPError should be wrapped in ValueError")
+
+
+def test_fetch_character_data_invalid_utf8_wrapped():
+    with mock.patch.object(urllib.request, "urlopen", return_value=_Resp(b"\xff\xfe\x00 garbage")):
+        try:
+            fetch_character_data(999999)
+        except ValueError as exc:
+            assert "non-JSON body" in str(exc)
+        else:
+            raise AssertionError("an invalid-UTF-8 body should be wrapped in ValueError")
 
 
 def test_monster_templates_are_well_formed():
@@ -544,7 +676,11 @@ def test_combatant_snap_json_roundtrip():
     from app import BattleApp
 
     app = BattleApp()
-    c = app.combatants[0]
+    c = Combatant(
+        name="Test", kind="PC", hp=12, max_hp=12, ac=15,
+        stats={1: 19, 2: 10, 3: 12, 4: 10, 5: 10, 6: 10},
+        saves={1}, proficiency=3,
+    )
     loaded = json.loads(json.dumps(app._combatant_snap(c)))
     assert all(isinstance(k, str) for k in loaded["stats"])
     norm = {int(k): v for k, v in loaded["stats"].items()}

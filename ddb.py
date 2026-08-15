@@ -80,7 +80,7 @@ def fetch_character_data(character_id: int) -> dict:
         with urllib.request.urlopen(request, timeout=15) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except ValueError as exc:
-        if isinstance(exc, json.JSONDecodeError):
+        if isinstance(exc, (json.JSONDecodeError, UnicodeDecodeError)):
             raise ValueError(f"D&D Beyond returned a non-JSON body: {exc}") from exc
         raise
     except urllib.error.HTTPError as exc:
@@ -267,7 +267,12 @@ def extract_combatant(character_id: int, data: dict) -> Combatant:
 
     hd = character.get("hitPointDice")
     if isinstance(hd, dict):
-        hd = ", ".join(f"{v}d{k}" for k, v in sorted(hd.items(), key=lambda kv: -_int(kv[0])))
+        # keep only numeric die-size keys, largest first
+        hd = ", ".join(
+            f"{v}d{k}"
+            for k, v in sorted(hd.items(), key=lambda kv: -_int(kv[0]))
+            if re.fullmatch(r"\d+", str(k))
+        )
     hit_dice = hd if isinstance(hd, str) else ""
 
     attacks: list[str] = []
