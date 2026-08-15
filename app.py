@@ -14,25 +14,12 @@ from __future__ import annotations
 import asyncio
 import json
 import random
-import re
-import urllib.error
-import urllib.request
 
-from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Vertical, VerticalScroll
 from textual.css.query import NoMatches
-from textual.screen import ModalScreen
-from textual.widgets import (
-    Header,
-    Input,
-    Label,
-    ListItem,
-    ListView,
-    Static,
-)
-from textual.widget import Widget
+from textual.widgets import Header, Input, Static
 from rich.text import Text
 
 from battle import (
@@ -46,283 +33,15 @@ from battle import (
     Combatant,
     build_encounter,
     coord_name,
+    encounter_monster,
     find_free_spot,
     resolve_attack,
     short_label,
 )
-
-COND_SHORT = {
-    "concentrating": "conc",
-    "frightened": "fright",
-    "incapacitated": "incap",
-    "exhaustion": "exh",
-    "unconscious": "uncon",
-    "invisible": "invis",
-    "restrained": "rest",
-    "paralyzed": "para",
-    "deafened": "deaf",
-    "grappled": "grap",
-    "petrified": "petr",
-    "blinded": "blind",
-    "charmed": "charm",
-    "prone": "prone",
-    "stunned": "stun",
-    "poisoned": "pois",
-}
-
-CELL_W = 4  # battle-map cell width in columns
-LEFT_W = 4  # battle-map left gutter (row labels)
-
-SAVE_PATH = "encounter.json"  # where 's' writes / 'l' reads the session
-
-
-def _abbrev(name: str) -> str:
-    return COND_SHORT.get(name, name[:6])
-
-
-def parse_ddb_url(url: str) -> int | None:
-    """Pull a character id out of a D&D Beyond character URL (or a bare id)."""
-    m = re.search(r"characters/(\d+)", url)
-    if m:
-        return int(m.group(1))
-    m = re.fullmatch(r"\s*(\d+)\s*", url)
-    if m:
-        return int(m.group(1))
-    return None
-
-
-# ---------------------------------------------------------------------------
-# Row widget — one combatant in the initiative list
-# ---------------------------------------------------------------------------
-
-
-class CombatantRow(Widget):
-    def __init__(self, combatant: Combatant) -> None:
-        super().__init__()
-        self.combatant = combatant
-        self.current = False
-        self.selected = False
-
-    def _style(self, color: str, bold: bool = False, extra: str = "") -> str:
-        bg = "#2f3f5c" if self.selected else ("#232b3a" if self.current else "#15181f")
-        return f"{'bold ' if bold else ''}{color} on {bg}{extra}"
-
-    def render(self) -> Text:
-        c = self.combatant
-        w = self.size.width
-        bar_w = 14 if w >= 70 else (10 if w >= 56 else 8)
-        name_cap = 16 if w < 64 else 18
-        ac_w = 6
-        name_w = min(name_cap, max(8, w - (16 + bar_w + ac_w)))
-        bg = self._style("#15181f")
-
-        t = Text()
-        arrow = "▶" if self.current else ("✝" if not c.alive else " ")
-        init_s = "--" if c.init is None else f"{c.init:>2}"
-        t.append(f"{arrow} {init_s} ", self._style("#e6ebf2" if self.current else "#8a93a3", self.current))
-
-        name = c.name[:name_w].ljust(name_w)
-        if not c.alive:
-            t.append(name, self._style("#66707d"))
-        else:
-            col = "#a8d0ff" if c.kind == "PC" else "#ff9d9d"
-            t.append(name, self._style(col, self.current))
-        t.append(" ", bg)
-
-        frac = c.hp_frac
-        if c.alive:
-            fill = round(frac * bar_w)
-            bcol = "#3fae6a" if frac > 0.5 else ("#d9a441" if frac > 0.25 else "#d95841")
-            t.append("█" * fill, self._style(bcol))
-            t.append("░" * (bar_w - fill), self._style("#39414f"))
-        else:
-            t.append("░" * bar_w, self._style("#39414f"))
-        t.append(" ", bg)
-
-        hp = f"{c.hp}/{c.max_hp}"
-        hcol = "#3fae6a" if frac > 0.5 else ("#d9a441" if frac > 0.25 else ("#d95841" if c.alive else "#66707d"))
-        t.append(hp.ljust(8), self._style(hcol, c.alive and frac <= 0.25))
-        t.append(" ", bg)
-
-        t.append(f"AC {c.ac}".ljust(ac_w), self._style("#cfd6e0"))
-
-        used = t.cell_len
-        for cn in sorted(c.conditions):
-            chip = f"{CONDITIONS[cn]['glyph']} {_abbrev(cn)}"
-            if used + len(chip) + 2 > w:
-                break
-            t.append(chip, self._style(CONDITIONS[cn]["color"]))
-            used = t.cell_len
-            if used + 2 <= w:
-                t.append("  ", bg)
-                used = t.cell_len
-        return t
-
-
-# ---------------------------------------------------------------------------
-# Map widget — the token grid, clickable to select
-# ---------------------------------------------------------------------------
-
-
-class MapGrid(Static):
-    def __init__(self, content: str = "", *, id: str | None = None) -> None:
-        super().__init__(content, id=id)
-        self.cell_w = CELL_W
-
-    def on_click(self, event: events.Click) -> None:
-        cx = (event.x - LEFT_W) // self.cell_w
-        cy = event.y - 1
-        if isinstance(self.app, BattleApp):
-            self.app.select_at(cx, cy)
-        event.stop()
-
-    def on_resize(self, event: events.Resize) -> None:
-        self.cell_w = 4 if event.size.width >= 20 else 3
-        if isinstance(self.app, BattleApp):
-            self.app._refresh_map()
-
-
-class InitiativeList(VerticalScroll, inherit_bindings=False):
-    """Initiative list that never eats the arrow keys (arrows drive the app)."""
-
-    BINDINGS: list[Binding] = []
-
-
-class LogView(VerticalScroll, inherit_bindings=False):
-    """Scrolling battle log that never eats the arrow keys."""
-
-    BINDINGS: list[Binding] = []
-
-
-# ---------------------------------------------------------------------------
-# Modal screens
-# ---------------------------------------------------------------------------
-
-
-class NumberModal(ModalScreen[int]):
-    BINDINGS = [("escape", "cancel", "Cancel")]
-
-    def __init__(self, title: str, target: str, placeholder: str) -> None:
-        super().__init__()
-        self._title = title
-        self._target = target
-        self._placeholder = placeholder
-        self._input: Input | None = None
-
-    def compose(self) -> ComposeResult:
-        with Container(classes="modal-box"):
-            yield Static(f"[bold #e6ebf2]{self._title} — [white]{self._target}[/][/]", classes="modal-title")
-            self._input = Input(placeholder=self._placeholder, type="integer")
-            yield self._input
-            yield Static("[dim][bold]Enter[/] apply · [bold]Esc[/] cancel[/]", classes="modal-hint")
-
-    def on_mount(self) -> None:
-        self.query_one(Input).focus()
-
-    def on_input_submitted(self, _: Input.Submitted) -> None:
-        self._finish()
-
-    def _finish(self) -> None:
-        try:
-            self.dismiss(int(self.query_one(Input).value))
-        except ValueError:
-            self.dismiss(None)
-
-    def action_cancel(self) -> None:
-        self.dismiss(None)
-
-
-class ListModal(ModalScreen[str]):
-    BINDINGS = [("escape", "cancel", "Cancel")]
-
-    def __init__(self, title: str, options: list[tuple[str, str]]) -> None:
-        super().__init__()
-        self._title = title
-        self._options = options
-
-    def compose(self) -> ComposeResult:
-        with Container(classes="modal-box"):
-            yield Static(f"[bold #e6ebf2]{self._title}[/]", classes="modal-title")
-            yield ListView(
-                *[ListItem(Label(label, classes="modal-item")) for _, label in self._options],
-                id="modal-list",
-            )
-            yield Static("[dim][bold]Enter[/] select · [bold]Esc[/] cancel[/]", classes="modal-hint")
-
-    def on_list_view_selected(self, event: ListView.Selected) -> None:
-        idx = event.list_view.index
-        if idx is not None and 0 <= idx < len(self._options):
-            self.dismiss(self._options[idx][0])
-
-    def action_cancel(self) -> None:
-        self.dismiss(None)
-
-
-class TextModal(ModalScreen[str]):
-    BINDINGS = [("escape", "cancel", "Cancel")]
-
-    def __init__(self, title: str, placeholder: str, confirm: str = "Import") -> None:
-        super().__init__()
-        self._title = title
-        self._placeholder = placeholder
-        self._confirm = confirm
-
-    def compose(self) -> ComposeResult:
-        with Container(classes="modal-box"):
-            yield Static(f"[bold #e6ebf2]{self._title}[/]", classes="modal-title")
-            self._input = Input(placeholder=self._placeholder)
-            yield self._input
-            yield Static(f"[dim][bold]Enter[/] {self._confirm} · [bold]Esc[/] cancel[/]", classes="modal-hint")
-
-    def on_mount(self) -> None:
-        self.query_one(Input).focus()
-
-    def on_input_submitted(self, _: Input.Submitted) -> None:
-        self._finish()
-
-    def _finish(self) -> None:
-        value = self.query_one(Input).value.strip()
-        self.dismiss(value if value else None)
-
-    def action_cancel(self) -> None:
-        self.dismiss(None)
-
-
-class HelpModal(ModalScreen[None]):
-    BINDINGS = [("escape", "cancel", "Cancel"), ("enter", "cancel", "Cancel")]
-
-    def compose(self) -> ComposeResult:
-        with Container(classes="modal-box"):
-            yield Static(
-                "[bold #e6ebf2]Battle Tracker[/]\n\n"
-                "[#8a93a3]A terminal combat tracker for D&D 5e DMs.\n"
-                "Everything lives on one screen: map, initiative, detail.[/]\n\n"
-                "[bold #a8d0ff]Keys[/]\n"
-                "  [bold]↑↓[/] select   [bold]←→[/] ±1 HP\n"
-                "  [bold]g[/] grab/place   [bold]n[/] next turn\n"
-                "  [bold]a[/] attack   [bold]d[/] damage   [bold]h[/] heal\n"
-                "  [bold]c[/] condition   [bold]m[/] monster   [bold]x[/] remove   [bold]r[/] reset\n"
-                "  [bold]o[/] roll monster init   [bold]t[/] set init\n"
-                "  [bold]i[/] import PC   [bold]f[/] find   [bold]e[/] edit\n"
-                "  [bold]p[/] add PC   [bold]ctrl+n[/] new encounter\n"
-                "  [bold]?[/] help   [bold]q[/] quit   [bold]ctrl+p[/] palette\n"
-                "  [bold]u[/] undo   [bold]shift+u[/] redo   [bold]s[/] save   [bold]l[/] load\n\n"
-                "[bold #a8d0ff]Map[/]\n"
-                "  click a token to select it; [bold]g[/] grabs, arrows place it\n"
-                "  [bold][#c9a227]▶ gold[/][/] = turn   [bold][#5b6471]✝ dim[/][/] = down\n"
-                "  blue = PC · red = monster · green = placing",
-                classes="modal-help",
-            )
-            yield Static("[dim][bold]Enter[/] or [bold]Esc[/] close[/]", classes="modal-hint")
-
-    def action_cancel(self) -> None:
-        self.dismiss(None)
-
-
-# ---------------------------------------------------------------------------
-# Main app
-# ---------------------------------------------------------------------------
-
+import ddb
+from ddb import ABILITY_NAMES
+from modals import HelpModal, ListModal, MonsterBrowser, NumberModal, TextModal
+from widgets import CombatantRow, InitiativeList, LEFT_W, LogView, MapGrid
 
 LOG_COLORS = {
     "info": "#c9d3e0",
@@ -337,32 +56,6 @@ LOG_COLORS = {
     "move": "#7d8794",
     "select": "#8a93a3",
     "remove": "#b39ddb",
-}
-
-
-def _iter_modifiers(character: dict):
-    mods = character.get("modifiers") or {}
-    if isinstance(mods, dict):
-        for group in mods.values():
-            if isinstance(group, list):
-                yield from group
-    elif isinstance(mods, list):
-        yield from mods
-
-
-ABILITY_NAMES = ["STR", "DEX", "CON", "INT", "WIS", "CHA"]
-
-_ABILITY_NAME_TO_ID = {
-    "strength": 1, "dexterity": 2, "constitution": 3,
-    "intelligence": 4, "wisdom": 5, "charisma": 6,
-}
-
-_SKILL_ABILITY = {
-    "acrobatics": 2, "animal handling": 5, "arcana": 4, "athletics": 1,
-    "deception": 6, "history": 4, "insight": 5, "intimidation": 6,
-    "investigation": 4, "medicine": 5, "nature": 4, "perception": 5,
-    "performance": 6, "persuasion": 6, "religion": 4, "sleight of hand": 2,
-    "stealth": 2, "survival": 5,
 }
 
 
@@ -469,6 +162,7 @@ class BattleApp(App[None]):
         Binding("a", "attack", "Attack"),
         Binding("c", "condition", "Condition"),
         Binding("m", "monster", "Monster"),
+        Binding("b", "browse", "Monster lib"),
         Binding("i", "import_pc", "Import PC"),
         Binding("f", "find", "Find"),
         Binding("e", "edit", "Edit"),
@@ -1167,17 +861,17 @@ class BattleApp(App[None]):
         )
         if not url:
             return
-        cid = parse_ddb_url(url)
+        cid = ddb.parse_ddb_url(url)
         if cid is None:
             self._log("Could not find a character id in that URL.", kind="warn")
             return
         self._log(f"Importing character {cid} from D&D Beyond…", kind="import")
         try:
-            data = await asyncio.to_thread(self._fetch_character_data, cid)
+            data = await asyncio.to_thread(ddb.fetch_character_data, cid)
         except Exception as exc:
             self._log(f"Import failed: {exc}", kind="warn")
             return
-        pc = self._extract_combatant(cid, data)
+        pc = ddb.extract_combatant(cid, data)
         if pc.name == f"Char {cid}":
             source = data.get("character")
             if not isinstance(source, dict):
@@ -1194,252 +888,6 @@ class BattleApp(App[None]):
         self.combatants.append(pc)
         self._sort_combatants()
         self._log(f"Imported {pc.name} ({pc.role}) — HP {pc.hp}/{pc.max_hp}, AC {pc.ac}.", kind="import")
-
-    @staticmethod
-    def _fetch_character_data(character_id: int) -> dict:
-        """Fetch a character from D&D Beyond's (unofficial) character service.
-
-        This is an internal endpoint, not a supported API contract — treat it
-        as best-effort and expect it to change.
-        """
-        url = f"https://character-service.dndbeyond.com/character/v5/character/{character_id}"
-        request = urllib.request.Request(
-            url,
-            headers={"User-Agent": "battle-tracker/1.0", "Accept": "application/json"},
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=15) as response:
-                payload = json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as exc:
-            try:
-                detail = json.loads(exc.read().decode("utf-8"))
-                message = detail.get("message") or str(exc)
-            except Exception:
-                message = str(exc)
-            raise ValueError(f"D&D Beyond returned {exc.code}: {message}") from exc
-        data = payload.get("data") or {}
-        if data.get("character") is None and not payload.get("success", True):
-            raise ValueError(payload.get("message", "character not found"))
-        return data
-
-    @staticmethod
-    def _extract_combatant(character_id: int, data: dict) -> Combatant:
-        character = data.get("character")
-        if not isinstance(character, dict) or not character:
-            character = data if isinstance(data, dict) else {}
-        name = character.get("name") or f"Char {character_id}"
-
-        total_level = 0
-        parts = []
-        classes = character.get("classes") or []
-        if isinstance(classes, dict):
-            classes = list(classes.values())
-        for cls in classes:
-            if not isinstance(cls, dict):
-                continue
-            definition = cls.get("definition")
-            if isinstance(definition, str):
-                definition = {"name": definition}
-            elif not isinstance(definition, dict):
-                definition = {}
-            cname = definition.get("name") or cls.get("name") or "?"
-            level = int(cls.get("level") or 1)
-            total_level += level
-            parts.append(f"{cname} {level}")
-        role = " / ".join(parts) if parts else f"Level {max(total_level, 1)} Adventurer"
-        if not total_level:
-            total_level = 1
-
-        # ability scores (ids: 1 STR, 2 DEX, 3 CON, 4 INT, 5 WIS, 6 CHA)
-        dex_mod = con_mod = 0
-        stats = character.get("stats")
-        if isinstance(stats, dict):
-            stats = list(stats.values())
-        if isinstance(stats, list) and stats and isinstance(stats[0], dict):
-            for stat in stats:
-                s_id = int(stat.get("id") or 0)
-                value = int(stat.get("value") or 10)
-                if s_id == 2:
-                    dex_mod = (value - 10) // 2
-                elif s_id == 3:
-                    con_mod = (value - 10) // 2
-        elif isinstance(stats, list) and stats and isinstance(stats[0], int) and len(stats) >= 3:
-            dex_mod = (int(stats[1]) - 10) // 2
-            con_mod = (int(stats[2]) - 10) // 2
-
-        # hit points: hit dice base + CON per level (+ any flat bonus)
-        max_hp = None
-        override = character.get("overrideHitPoints")
-        if isinstance(override, dict):
-            max_hp = int(override.get("value") or override.get("max"))
-        if max_hp is None:
-            base = int(character.get("baseHitPoints") or 0)
-            bonus = int(character.get("bonusHitPoints") or 0)
-            max_hp = base + bonus + con_mod * total_level
-            if max_hp <= 0:
-                max_hp = 10 + total_level * 5
-        current = max(0, max_hp - int(character.get("removedHitPoints") or 0))
-
-        # armor class: armor base + dex (capped by armor type) + shield + AC bonuses
-        ac = 10
-        dex_cap = None
-        wearing_armor = False
-        shield_bonus = 0
-        inventory = character.get("inventory") or []
-        if isinstance(inventory, list):
-            for item in inventory:
-                if not item.get("equipped"):
-                    continue
-                defn = item.get("definition")
-                if not isinstance(defn, dict):
-                    continue
-                item_ac = defn.get("armorClass")
-                atype = defn.get("armorTypeId")
-                if atype in (1, 2, 3) and item_ac:
-                    ac = int(item_ac)
-                    dex_cap = {1: None, 2: 2, 3: 0}[atype]
-                    wearing_armor = True
-            for item in inventory:
-                if not item.get("equipped"):
-                    continue
-                defn = item.get("definition")
-                if not isinstance(defn, dict):
-                    continue
-                item_ac = defn.get("armorClass")
-                atype = defn.get("armorTypeId")
-                iname = (defn.get("name") or "").lower()
-                if (atype == 4 or "shield" in iname) and item_ac:
-                    shield_bonus += int(item_ac)
-        ac += shield_bonus
-        for mod in _iter_modifiers(character):
-            if mod.get("type") == "bonus" and mod.get("subType") in ("armor-class", "armored-armor-class"):
-                value = mod.get("fixedValue")
-                if value is None:
-                    value = mod.get("value")
-                if value:
-                    ac += int(value)
-        ac += dex_mod if not wearing_armor else (dex_mod if dex_cap is None else min(dex_mod, dex_cap))
-
-        race = ""
-        race_obj = character.get("race")
-        if isinstance(race_obj, str):
-            race = f"{race_obj} "
-        elif isinstance(race_obj, dict):
-            rname = race_obj.get("fullName") or race_obj.get("baseRaceName")
-            if rname:
-                race = f"{rname} "
-
-        ability_names = ABILITY_NAMES
-        stat_values = {}
-        if isinstance(stats, list) and stats and isinstance(stats[0], dict):
-            for stat in stats:
-                stat_values[int(stat.get("id") or 0)] = int(stat.get("value") or 0)
-        elif isinstance(stats, list) and stats and isinstance(stats[0], int):
-            for i, value in enumerate(stats[:6]):
-                stat_values[i + 1] = int(value)
-        stats_text = ", ".join(
-            f"{ability_names[i]} {stat_values.get(i + 1, '?')}" for i in range(6)
-        )
-        note = f"{race}{role} — {stats_text}. Imported from D&D Beyond."
-
-        def _stat_mod(aid: int) -> int:
-            return (int(stat_values.get(aid, 10)) - 10) // 2
-
-        prof = character.get("proficiencyBonus")
-        prof = int(prof) if isinstance(prof, int) else 2 + (total_level - 1) // 4
-
-        saves: set[int] = set()
-        for cls in classes:
-            definition = cls.get("definition")
-            if not isinstance(definition, dict):
-                continue
-            st = definition.get("savingThrows")
-            if isinstance(st, list):
-                for s in st:
-                    aid = _ABILITY_NAME_TO_ID.get(str(s).lower())
-                    if aid:
-                        saves.add(aid)
-            elif isinstance(st, dict):
-                for k, v in st.items():
-                    if v and _ABILITY_NAME_TO_ID.get(str(k).lower()):
-                        saves.add(_ABILITY_NAME_TO_ID[str(k).lower()])
-
-        skill_ranks: dict[str, int] = {}
-        for mod in _iter_modifiers(character):
-            mtype = mod.get("type")
-            if mtype not in ("proficiency", "expertise"):
-                continue
-            sub = (mod.get("subType") or "").strip().lower()
-            if sub in _SKILL_ABILITY:
-                skill_ranks[sub] = 2 if mtype == "expertise" else 1
-        skills = {
-            name: _stat_mod(_SKILL_ABILITY[name]) + prof * rank
-            for name, rank in skill_ranks.items()
-        }
-        perception = skills.get("perception")
-        passive_perception = 10 + (perception if perception is not None else _stat_mod(5))
-
-        speed = character.get("speed")
-        if isinstance(speed, dict):
-            speed = speed.get("walk")
-        speed = int(speed) if isinstance(speed, (int, float)) else None
-
-        hd = character.get("hitPointDice")
-        if isinstance(hd, dict):
-            hd = "".join(f"{v}d{k}" for k, v in hd.items())
-        hit_dice = hd if isinstance(hd, str) else ""
-
-        attacks: list[str] = []
-        str_mod = _stat_mod(1)
-        if isinstance(inventory, list):
-            for item in inventory:
-                if not item.get("equipped") or len(attacks) >= 4:
-                    continue
-                defn = item.get("definition")
-                if not isinstance(defn, dict):
-                    continue
-                dmg = defn.get("damage")
-                if not dmg:
-                    continue
-                if defn.get("attackType") is None and not defn.get("weaponDefinition") \
-                        and not defn.get("range") and not defn.get("damageType"):
-                    continue
-                stat_mod = dex_mod if defn.get("range") else str_mod
-                dmg_bonus = int(defn.get("damageBonus") or 0)
-                dtype = str(defn.get("damageType") or "")
-                attacks.append(
-                    f"{(defn.get('name') or '?')} +{stat_mod + prof + dmg_bonus} · {dmg}{stat_mod + dmg_bonus:+d} {dtype[:3].lower()}"
-                )
-
-        traits: list[str] = []
-        if race:
-            traits.append(f"{race.strip()} racial traits")
-        features = character.get("classFeatures") or []
-        if isinstance(features, list):
-            for f in features[:2]:
-                if isinstance(f, dict) and f.get("name"):
-                    traits.append(f["name"])
-
-        return Combatant(
-            name=name,
-            kind="PC",
-            hp=current,
-            max_hp=max_hp,
-            ac=ac,
-            init=None,
-            init_mod=dex_mod,
-            role=role,
-            note=note,
-            stats={aid: stat_values.get(aid, 10) for aid in range(1, 7)},
-            saves=saves,
-            speed=speed,
-            proficiency=prof,
-            hit_dice=hit_dice,
-            skills=skills,
-            passive_perception=passive_perception,
-            attacks=attacks,
-            traits=traits,
-        )
 
     # -- conditions / monsters ------------------------------------------------
 
@@ -1485,19 +933,22 @@ class BattleApp(App[None]):
         picked = await self.push_screen(ListModal("ADD MONSTER", options), wait_for_dismiss=True)
         if picked is None:
             return
-        tmpl = MONSTERS[picked]
-        count = sum(1 for c in self.combatants if c.name == picked or c.name.startswith(picked + " ")) + 1
-        name = picked if count == 1 else f"{picked} {count}"
+        self._spawn_monster(picked)
+
+    def action_browse(self) -> None:
+        self.run_worker(self._browse_flow())
+
+    async def _browse_flow(self) -> None:
+        picked = await self.push_screen(MonsterBrowser(MONSTERS), wait_for_dismiss=True)
+        if picked is None:
+            return
+        self._spawn_monster(picked)
+
+    def _spawn_monster(self, template: str) -> None:
+        count = sum(1 for c in self.combatants if c.name == template or c.name.startswith(template + " ")) + 1
+        name = template if count == 1 else f"{template} {count}"
         x, y = find_free_spot(self.combatants, MAP_COLS, MAP_ROWS)
-        mob = Combatant(name=name, kind="monster", hp=tmpl["max_hp"], max_hp=tmpl["max_hp"],
-                        ac=tmpl["ac"], init=None, init_mod=tmpl["init"],
-                        role=tmpl["role"], note=tmpl["note"], x=x, y=y,
-                        stats=dict(tmpl.get("stats", {})), saves=set(tmpl.get("saves", set())),
-                        speed=tmpl.get("speed"), proficiency=tmpl.get("proficiency"),
-                        skills=dict(tmpl.get("skills", {})),
-                        passive_perception=tmpl.get("passive_perception"),
-                        attacks=list(tmpl.get("attacks", [])), traits=list(tmpl.get("traits", [])),
-                        spells=list(tmpl.get("spells", [])))
+        mob = encounter_monster(template, name, x=x, y=y)
         self._push_undo()
         self.combatants.append(mob)
         self._sort_combatants()

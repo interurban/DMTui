@@ -3,7 +3,8 @@
 import asyncio
 import os
 
-from app import BattleApp, parse_ddb_url
+from app import BattleApp
+from ddb import parse_ddb_url
 from textual.widgets import Input, Static
 
 SHOTS = os.path.join(os.path.dirname(__file__), "shots")
@@ -238,10 +239,26 @@ async def main() -> None:
                 {"id": 5, "value": 10},
                 {"id": 6, "value": 10},
             ],
-            "inventory": [],
+            "inventory": [
+                {
+                    "equipped": True,
+                    "definition": {
+                        "name": "Quarterstaff",
+                        "damage": {"diceString": "1d6", "value": 3},
+                        "damageBonus": 0,
+                        "damageType": "Bludgeoning",
+                        "attackType": 1,
+                    },
+                }
+            ],
+            "spells": {
+                "0": [{"definition": {"name": "Fire Bolt", "level": 0}}],
+                "1": [{"definition": {"name": "Shield", "level": 1}}],
+            },
             "modifiers": {},
         }
-        app._fetch_character_data = lambda _cid: canned
+        import ddb
+        ddb.fetch_character_data = lambda _cid: canned
         n = len(app.combatants)
         await pilot.press("i")
         await pilot.pause()
@@ -258,6 +275,8 @@ async def main() -> None:
         assert zephyr.ac == 12 and zephyr.role == "Wizard 4"
         assert zephyr.init is None and zephyr.init_mod == 2
         assert "STR 8, DEX 14, CON 10, INT 17, WIS 10, CHA 10" in zephyr.note, zephyr.note
+        assert zephyr.attacks and zephyr.attacks[0].startswith("Quarterstaff +1 · 1d6-1"), zephyr.attacks
+        assert "Fire Bolt" in zephyr.spells and "Shield" in zephyr.spells, zephyr.spells
         log_txt = str(app.query_one("#log-content", Static).content)
         assert "Imported Zephyr" in log_txt, log_txt
         app.save_screenshot(os.path.join(SHOTS, "20-imported.png"))
@@ -319,6 +338,22 @@ async def main() -> None:
         await pilot.pause()
         assert len(app.combatants) == n + 1, len(app.combatants)
         await pilot.press("shift+u")
+        await pilot.pause()
+        assert len(app.combatants) == 0, len(app.combatants)
+
+        # monster library browser (b): type a filter, Enter adds the match
+        await pilot.press("b")
+        await pilot.pause()
+        await pilot.press("t", "r", "o", "l")
+        await pilot.pause()
+        app.save_screenshot(os.path.join(SHOTS, "30-monster-browser.png"))
+        await pilot.press("enter")
+        await pilot.pause()
+        assert [c.name for c in app.combatants] == ["Troll"], [c.name for c in app.combatants]
+        troll = app.combatants[0]
+        assert troll.max_hp == 84 and troll.ac == 15 and troll.init_mod == 1
+        assert any("Regeneration" in t for t in troll.traits)
+        await pilot.press("u")
         await pilot.pause()
         assert len(app.combatants) == 0, len(app.combatants)
 

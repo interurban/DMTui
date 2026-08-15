@@ -8,7 +8,7 @@ from battle import (
     roll_dice,
     short_label,
 )
-from app import parse_ddb_url
+from ddb import extract_combatant, parse_ddb_url
 
 
 class Seq:
@@ -132,6 +132,138 @@ def test_parse_ddb_url():
     assert parse_ddb_url("9876543") == 9876543
     assert parse_ddb_url("https://example.com/other") is None
     assert parse_ddb_url("") is None
+    assert parse_ddb_url("https://www.dndbeyond.com/characters/12345?foo=bar") == 12345
+
+
+REALISTIC = {
+    "character": {
+        "name": "Baldrik",
+        "classes": [
+            {
+                "level": 3,
+                "definition": {
+                    "name": "Fighter",
+                    "savingThrows": ["strength", "constitution"],
+                },
+            }
+        ],
+        "race": {"fullName": "Dwarf", "baseRaceName": "Dwarf"},
+        "baseHitPoints": 22,
+        "bonusHitPoints": 4,
+        "removedHitPoints": 6,
+        "stats": {"1": 16, "2": 12, "3": 15, "4": 8, "5": 10, "6": 10},
+        "proficiencyBonus": 2,
+        "speed": {"walk": 25},
+        "hitPointDice": {"8": 3},
+        "inventory": [
+            {
+                "equipped": True,
+                "definition": {
+                    "name": "Battleaxe",
+                    "damage": {"diceString": "1d8", "value": 5},
+                    "damageBonus": 0,
+                    "damageType": "Slashing",
+                    "attackType": 1,
+                },
+            },
+            {
+                "equipped": True,
+                "definition": {
+                    "name": "Shield",
+                    "armorClass": 2,
+                    "armorTypeId": 4,
+                    "damage": None,
+                },
+            },
+        ],
+        "classFeatures": {"0": {"name": "Second Wind"}, "1": {"name": "Action Surge"}},
+        "spells": {"0": [{"definition": {"name": "Booming Blade", "level": 0}}]},
+        "modifiers": {
+            "bonus": [
+                {"type": "bonus", "subType": "armor-class", "fixedValue": 1, "friendlyTypeName": "Ring of Protection"}
+            ],
+            "proficiency": [
+                {"type": "proficiency", "subType": "athletics"},
+                {"type": "proficiency", "subType": "perception"},
+                {"type": "expertise", "subType": "survival"},
+            ],
+        },
+    }
+}
+
+
+def test_extract_combatant_realistic():
+    c = extract_combatant(424242, REALISTIC)
+    assert c.name == "Baldrik" and c.kind == "PC"
+    assert c.role == "Fighter 3"
+    assert c.max_hp == 22 + 4 + 2 * 3 and c.hp == c.max_hp - 6   # +CON per level
+    assert c.ac == 10 + 2 + 1 + 1                                  # shield + dex + bonus
+    assert c.init_mod == 1                                         # DEX 12
+    assert c.saves == {1, 3}                                       # STR + CON
+    assert c.skills == {"athletics": 5, "perception": 2, "survival": 4}
+    assert c.passive_perception == 12
+    assert c.speed == 25 and c.hit_dice == "3d8"
+    assert c.attacks[0].startswith("Battleaxe +5 · 1d8+3"), c.attacks
+    assert c.spells == ["Booming Blade"]
+    assert any("racial traits" in t for t in c.traits) and "Second Wind" in c.traits
+    assert "Fighter 3" in c.note and "STR 16" in c.note
+
+
+def test_extract_combatant_sparse():
+    c = extract_combatant(7, {})
+    assert c.name == "Char 7"
+    assert c.role == "Level 1 Adventurer"
+    assert c.hp == 15 and c.max_hp == 15
+    assert c.ac == 10 and c.init_mod == 0
+    assert c.stats == {i: 10 for i in range(1, 7)}
+    assert c.attacks == [] and c.spells == [] and c.traits == []
+
+
+def test_extract_combatant_stats_int_list():
+    data = {
+        "character": {
+            "name": "Hasty",
+            "stats": [15, 14, 13, 12, 10, 8],
+            "baseHitPoints": 10,
+            "inventory": [],
+            "modifiers": {},
+        }
+    }
+    c = extract_combatant(1, data)
+    assert c.init_mod == 2 and c.stats[1] == 15 and c.stats[6] == 8
+
+
+def test_extract_combatant_weapon_without_attack_fields_skipped():
+    data = {
+        "character": {
+            "name": "Plain",
+            "stats": {"1": 10, "2": 10, "3": 10, "4": 10, "5": 10, "6": 10},
+            "inventory": [{"equipped": True, "definition": {"name": "Lantern", "damage": None}}],
+            "modifiers": {},
+        }
+    }
+    c = extract_combatant(2, data)
+    assert c.attacks == []
+
+
+def test_monster_templates_are_well_formed():
+    """Every library template builds a sane Combatant via encounter_monster."""
+    from battle import MONSTERS, encounter_monster
+
+    assert len(MONSTERS) >= 15, len(MONSTERS)
+    for name, t in MONSTERS.items():
+        c = encounter_monster(name, name)
+        assert c.name == name and c.kind == "monster"
+        assert c.max_hp > 0 and c.ac >= 0
+        assert isinstance(c.attacks, list) and c.attacks, (name, c.attacks)
+        assert c.role and c.stats
+        assert c.init is None and c.init_mod is not None
+
+
+def test_monster_names_unique():
+    from battle import MONSTERS
+
+    assert len(set(MONSTERS)) == len(MONSTERS)
 
 
 def test_combatant_snap_json_roundtrip():

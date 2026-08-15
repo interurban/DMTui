@@ -3,6 +3,22 @@
 Sprint log for the Battle Tracker — a single-screen terminal combat tracker
 for D&D 5e DMs (Textual). Run: `.venv/bin/python app.py`.
 
+## Sprint F — Polish + monster library (complete)
+
+Finished off the tool:
+
+- Split the monolith: `app.py` 1663 → 1114 lines. `modals.py` (prompt/help
+  screens + the new `MonsterBrowser`), `widgets.py` (initiative row, token
+  map, scroll containers), `ddb.py` (import parsing, from Sprint E). `MapGrid`
+  duck-types the app, breaking the import cycle.
+- Monster library doubled: 10 → 20 templates (Bandit, Bandit Captain,
+  Giant Rat, Gnoll, Harpy, Kobold, Owlbear, Specter, Troll, Zombie).
+- `b` monster library: searchable picker — type to filter live, Enter adds a
+  single match or hands you to the list. Spawning now shares `_spawn_monster`.
+- README (run, key map, dev, layout) + `requirements.txt` (textual>=8.2).
+- Tests: 19 (all templates well-formed via `encounter_monster`, unique names).
+  Smoke adds a browser scenario (filter → add Troll → undo).
+
 ## Sprint B — Editability + encounter building (complete)
 
 Made the encounter yours to build:
@@ -65,5 +81,6 @@ Made the stat blocks real instead of decorative:
 
 ## Next
 
-- **E: Tests + import hardening** — normalize DDB parsing against realistic
-  payloads, split the monolith.
+- No planned sprints — the tool is feature-complete. Ideas if it grows again:
+  monster stat blocks in the detail card, condition-tied map colours,
+  turn timer / encounter notes.
