@@ -296,7 +296,7 @@ def extract_combatant(character_id: int, data: dict) -> Combatant:
         # otherwise the flat damage bonus does not help you hit (5e)
         to_hit = _int(defn.get("attackBonus"), stat_mod + prof)
         attacks.append(
-            f"{(defn.get('name') or '?')} {to_hit:+d} · {dmg}{stat_mod + dmg_bonus:+d} {dtype[:3].lower()}"
+            f"{(defn.get('name') or '?')} {to_hit:+d} · {dmg}{stat_mod + dmg_bonus:+d} {dtype.lower()}"
         )
 
     traits: list[str] = []

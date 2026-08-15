@@ -3,6 +3,19 @@
 Sprint log for the Battle Tracker — a single-screen terminal combat tracker
 for D&D 5e DMs (Textual). Run: `.venv/bin/python app.py`.
 
+## Map centring + detail card polish (complete)
+
+- Loaded PCs now land in the middle of the map: `_place_pc` spirals outward
+  from the grid centre, so a party clusters mid-map, spread a cell apart,
+  instead of hugging the top-left corner. Boot waits for the map grid to
+  reach its real size first (`_wait_map_ready`) so centred placement doesn't
+  race the initial layout.
+- Detail card: weapon damage types spelled out in full — "1d8+2 piercing",
+  not "pie".
+- Detail card: the `SKILLS` label dropped from the skills row.
+- Smoke: the blocked-move check no longer assumes top-left boot geometry; it
+  parks Lyra directly above Zephyr first.
+
 ## Detail card note + smoke suite fixes (complete)
 
 - The DDB import note no longer re-lists ability scores — the detail card

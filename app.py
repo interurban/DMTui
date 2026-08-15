@@ -348,15 +348,18 @@ class BattleApp(App[None]):
         )
 
     def _place_pc(self, pc: Combatant) -> bool:
-        """Place a PC on a free cell scanning from the top-left. Independent of
-        the live MAP_COLS/MAP_ROWS globals so boot placement is stable even
-        while the layout is still settling."""
+        """Place a PC as close to the map centre as possible, spiralling
+        outward so a loaded party spreads out from the middle."""
         occupied = {(c.x, c.y) for c in self.combatants}
-        for y in range(60):
-            for x in range(60):
-                if (x, y) not in occupied:
-                    pc.x, pc.y = x, y
-                    return True
+        cx, cy = MAP_COLS // 2, MAP_ROWS // 2
+        cells = sorted(
+            ((x, y) for y in range(MAP_ROWS) for x in range(MAP_COLS)),
+            key=lambda xy: ((xy[0] - cx) ** 2 + (xy[1] - cy) ** 2, xy[1], xy[0]),
+        )
+        for x, y in cells:
+            if (x, y) not in occupied:
+                pc.x, pc.y = x, y
+                return True
         return False
 
     async def _import_campaign(self, name: str) -> int:
@@ -381,7 +384,18 @@ class BattleApp(App[None]):
         self._set_active_campaign(name)
         return placed
 
+    async def _wait_map_ready(self) -> None:
+        """Wait until the map grid has a real size so centred placement lands
+        on the visible grid, not the pre-layout default."""
+        for _ in range(100):
+            grid = self.query_one("#map", MapGrid)
+            if grid.size.width > 8 and grid.size.height > 4:
+                self._refresh_map()
+                return
+            await asyncio.sleep(0.02)
+
     async def _boot_campaign(self) -> None:
+        await self._wait_map_ready()
         data = self._campaigns_read()
         name = data.get("active") or DEFAULT_CAMPAIGN
         placed = await self._import_campaign(name)
@@ -679,7 +693,7 @@ class BattleApp(App[None]):
             lines.append(f"[bold]SAVES[/]  {'  '.join(parts)}")
         if c.skills:
             sk = "  ".join(f"[bold]{k.capitalize()}[/] {v:+d}" for k, v in sorted(c.skills.items()))
-            lines.append(f"[bold]SKILLS[/]  {sk}")
+            lines.append(sk)
             lines.append("")
         if c.attacks:
             for atk in c.attacks:

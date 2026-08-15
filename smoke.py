@@ -275,7 +275,8 @@ async def main() -> None:
         assert app._sel.name == "Zephyr", app._sel.name
         app.save_screenshot(os.path.join(SHOTS, "13-click-selected.png"))
 
-        # block: grab Zephyr and nudge up — Lyra holds (sx-1, sy)
+        # block: park Lyra directly above Zephyr, grab and nudge up — she holds
+        lyra.x, lyra.y = zephyr.x, zephyr.y - 1
         await pilot.press("g")
         await pilot.pause()
         hx, hy = app._sel.x, app._sel.y
