@@ -815,5 +815,94 @@ def test_srd_combatant_resolves():
     assert res["kind"] == "attack" and res["hit"] and res["damage"] == 6  # 4 + 2
 
 
+# -- SRD spell conversion ---------------------------------------------------
+
+FIREBALL = {
+    "name": "Fireball", "level": 3, "school": {"name": "Evocation", "key": "evocation"},
+    "casting_time": "action", "range": 150, "range_text": "150 feet",
+    "components": "V, S, M", "duration": "instantaneous",
+    "damage_roll": "8d6", "damage_types": ["fire"], "saving_throw_ability": "dexterity",
+    "desc": "A bright streak flashes and then explodes. Each creature in a 20-foot-radius sphere must make a Dexterity saving throw. A target takes 8d6 fire damage on a failed save.",
+    "document": {"key": "srd-2014"},
+}
+CURE = {
+    "name": "Cure Wounds", "level": 1, "school": {"name": "Evocation", "key": "evocation"},
+    "casting_time": "action", "range": 0, "range_text": "touch",
+    "components": "V, S", "duration": "instantaneous",
+    "damage_roll": "", "damage_types": [], "saving_throw_ability": None,
+    "desc": "A creature you touch regains 1d8 + 2 hit points for each spell slot level above 1st.",
+    "document": {"key": "srd-2014"},
+}
+HOLD = {
+    "name": "Hold Person", "level": 2, "school": {"name": "Enchantment", "key": "enchantment"},
+    "casting_time": "action", "range": 60, "range_text": "60 feet",
+    "components": "V, S, M", "duration": "1 minute",
+    "damage_roll": "", "damage_types": [], "saving_throw_ability": "wisdom",
+    "desc": "Choose a humanoid that you can see. The target must succeed on a Wisdom saving throw or be paralyzed.",
+    "document": {"key": "srd-2014"},
+}
+MMISSILE = {
+    "name": "Magic Missile", "level": 1, "school": {"name": "Evocation", "key": "evocation"},
+    "casting_time": "action", "range": 120, "range_text": "120 feet",
+    "components": "V, S", "duration": "instantaneous",
+    "damage_roll": "", "damage_types": [], "saving_throw_ability": None,
+    "desc": "You create three glowing darts of force. Each dart hits a creature of your choice for 1d4 + 1 force damage.",
+    "document": {"key": "srd-2014"},
+}
+
+
+def test_srd_spell_to_fields():
+    f = srd_client.spell_to_fields(FIREBALL)
+    assert f["name"] == "Fireball" and f["level"] == 3 and f["school"] == "Evocation"
+    # damage spell with a save -> engine-ready string with default DC 13
+    assert f["cast"] == "Fireball — 8d6 fire (dex DC 13)", f["cast"]
+    assert srd_client.spell_to_fields(CURE)["cast"] == "Cure Wounds — 1d8+2 HP"
+    assert srd_client.spell_to_fields(HOLD)["cast"] == "Hold Person — (wis DC 13)"
+    # "three darts" word form is caught and multiplied
+    assert srd_client.spell_to_fields(MMISSILE)["cast"] == "Magic Missile — 3 darts, 1d4+1 force", \
+        srd_client.spell_to_fields(MMISSILE)["cast"]
+
+
+def test_srd_spell_resolves():
+    """An SRD spell string resolves in the engine (damage + heal contracts)."""
+    from battle import Combatant, resolve_attack
+
+    dmg = srd_client.spell_to_fields(FIREBALL)["cast"]
+    target = Combatant("Dummy", "PC", hp=50, max_hp=50, ac=10, stats={3: 10})
+    # all dice roll 1 (8d6 -> 8); CON save roll (1) + mod (2) = 3 < 13 -> not saved
+    res = resolve_attack(Combatant("Caster", "monster", hp=1, max_hp=1, ac=10), dmg, target, Seq([1] * 10))
+    assert res["kind"] == "spell" and res["damage"] == 8
+    # The spell branch skips the d20, so the die roll consumes the first RNG
+    # value: 1d8+2 -> 7+2 = 9 (resolver returns the heal in `damage`; the app
+    # applies it via _apply_attack_result)
+    heal = srd_client.spell_to_fields(CURE)["cast"]
+    wounded = Combatant("Ally", "PC", hp=3, max_hp=10, ac=10)
+    res = resolve_attack(Combatant("Healer", "monster", hp=1, max_hp=1, ac=10), heal, wounded, Seq([7]))
+    assert res["heal"] and res["damage"] == 9
+
+
+def test_srd_spells_fetch_and_cache():
+    page = {"next": None, "results": [
+        {"name": "Fireball", "document": {"key": "srd-2014"}, **FIREBALL},
+        {"name": "Homebrew Spell", "document": {"key": "not-srd"}},
+    ]}
+    calls = []
+
+    def fake_get(url):
+        calls.append(url)
+        return page
+
+    with tempfile.TemporaryDirectory() as tmp:
+        with mock.patch.object(srd_client, "_http_get_json", fake_get), \
+             mock.patch.object(srd_client, "CACHE_DIR", tmp):
+            out = srd_client.get_srd_spells(force=True)
+            assert [m["name"] for m in out] == ["Fireball"]
+            assert os.path.exists(os.path.join(tmp, "spells.json"))
+            calls.clear()
+            out2 = srd_client.get_srd_spells(force=False)
+            assert [m["name"] for m in out2] == [m["name"] for m in out]
+            assert calls == []
+
+
 if __name__ == "__main__":
     main()

@@ -3,6 +3,26 @@
 Sprint log for the Battle Tracker — a single-screen terminal combat tracker
 for D&D 5e DMs (Textual). Run: `.venv/bin/python app.py`.
 
+## SRD spellbook (complete)
+
+The Open5e integration now covers spells, not just monsters — the generic
+`srd.py` client meant to grow.
+
+- **`srd.py`** — `spell_to_fields` + `get_srd_spells` convert Open5e v2 spells
+  into engine-ready attack strings (`Fireball — 8d6 fire (dex DC 13)`,
+  `Cure Wounds — 1d8+2 HP`, `Hold Person — (wis DC 13)`,
+  `Magic Missile — 3 darts, 1d4+1 force`). Damage comes from `damage_roll`
+  (else scraped from the description), save spells tag the ability, heal spells
+  are detected by name, and "N darts" (incl. word forms like "three darts") is
+  multiplied. SRD content ships under both `srd-2014`/`srd-2024`, so
+  `fetch_raw` now dedupes by name, preferring `srd-2014`.
+- **Spellbook UI** — `v` opens `SpellBrowser`, a searchable picker mirroring
+  `MonsterLibrary` (large, keep-open, `f` to fetch on demand). Selecting a
+  spell appends its attack string to the **selected creature's** `spells` list,
+  where it immediately becomes usable in the `a` attack flow.
+- Tests: 4 new (spell conversion across damage/heal/save/darts, engine
+  resolution, fetch+cache). 58 unit tests + full smoke pass.
+
 ## Open5e SRD integration + enhanced monster library (complete)
 
 The tracker can now pull the official D&D 5e System Reference Document from

@@ -68,6 +68,20 @@ _ABILITY_SHORT = {
     "charisma": "cha",
 }
 
+# Heal detection (mirrors battle.py's _HEAL_RE) so SRD heal spells resolve as
+# heals in the attack engine.
+_HEAL_RE = re.compile(
+    r"\b(heal\w*|cure\w*|restore\w*|mend\w*|regain\w*|regenerat\w*)\b",
+    re.IGNORECASE,
+)
+
+# "N darts" multiplier (mirrors battle.py's _DARTS_RE).
+_DARTS_RE = re.compile(r"(\d+)\s+darts?\b", re.IGNORECASE)
+
+# Bare dice expression finder (mirrors battle.py's _DICE_RE) for scraping
+# damage out of a spell description when `damage_roll` is empty.
+_DICE_RE = re.compile(r"\d*d\d+(?:[+-]\d+)?")
+
 _TO_HIT = re.compile(r"([+-]?\d+)\s+to\s+hit", re.IGNORECASE)
 # Matches both "Hit: 5 (1d6 + 2) slashing damage" and
 # "taking 21 (6d6) fire damage …" (save-based breath weapons).
@@ -112,17 +126,25 @@ def _http_get_json(url: str):
 
 def fetch_raw(endpoint: str, document_keys=None, limit: int = 200) -> list[dict]:
     """Page through an Open5e v2 collection, optionally keeping only results
-    from the given document keys. Returns the raw result dicts."""
-    results: list[dict] = []
+    from the given document keys. Returns the raw result dicts.
+
+    SRD content ships under both `srd-2014` and `srd-2024`, so the same creature
+    or spell appears twice; we dedupe by name, preferring `srd-2014`."""
+    best: dict[str, tuple[int, dict]] = {}
+    prio = {"srd-2014": 0, "srd-2024": 1}
     url = f"{BASE}{endpoint.rstrip('/')}/?limit={limit}"
     while url:
         data = _http_get_json(url)
         for row in data.get("results", []):
             doc_key = (row.get("document") or {}).get("key")
-            if document_keys is None or doc_key in document_keys:
-                results.append(row)
+            if document_keys is not None and doc_key not in document_keys:
+                continue
+            name = row.get("name")
+            p = prio.get(doc_key, 2)
+            if name not in best or p < best[name][0]:
+                best[name] = (p, row)
         url = data.get("next")
-    return results
+    return [v[1] for v in best.values()]
 
 
 def cache_path(name: str) -> str:
@@ -290,3 +312,93 @@ def srd_monster_to_fields(mon: dict) -> dict:
 def get_srd_monsters(force: bool = False) -> list[dict]:
     """Fetch + cache the SRD monster library as field dicts."""
     return get_collection("monsters", "creatures", srd_monster_to_fields, document_keys=SRD_DOC_KEYS, force=force)
+
+
+# ---------------------------------------------------------------------------
+# Spell conversion
+# ---------------------------------------------------------------------------
+
+# Spell save/heal parsing reuses the monster attack regexes; add word->digit so
+# "three darts" (Magic Missile) is caught the same way "3 darts" is.
+_WORD_NUM = {
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
+    "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+}
+_WORD_DARTS = re.compile(r"\b(" + "|".join(_WORD_NUM) + r")\b.{0,30}?\bdarts?\b", re.IGNORECASE)
+
+
+def _spell_cast_string(spell: dict) -> str:
+    """Build the engine-ready attack string for an SRD spell so it can be slotted
+    straight into a creature's `spells` list and resolved by `resolve_attack`.
+
+    Damage comes from `damage_roll` when present, else the spell description.
+    Save-based and heal spells are tagged the same way the hand-authored
+    templates are; SRD spells carry no caster DC, so save spells fall back to a
+    default DC 13 (cosmetic — the tracker doesn't actually apply the effect)."""
+    name = _as_text(spell.get("name")) or "Spell"
+    heal = bool(_HEAL_RE.search(name))
+
+    dice = (spell.get("damage_roll") or "").strip()
+    if not dice:
+        # SRD descriptions space out the bonus ("1d8 + 2"); strip whitespace so
+        # the dice regex captures the full expression.
+        m = _DICE_RE.search(re.sub(r"\s+", "", spell.get("desc") or ""))
+        if m:
+            dice = m.group(0)
+    dice = re.sub(r"\s+", "", dice)
+
+    dtypes = spell.get("damage_types") or []
+    if dtypes:
+        dtype = _abbr(_as_text(dtypes[0]))
+    else:
+        dm = re.search(r"([A-Za-z ]+?)\s+damage", spell.get("desc") or "", re.IGNORECASE)
+        dtype = _abbr(dm.group(1)) if dm else ""
+
+    darts_m = _DARTS_RE.search(spell.get("desc") or "")
+    if not darts_m:
+        darts_m = _WORD_DARTS.search(spell.get("desc") or "")
+    darts = None
+    if darts_m:
+        n = _WORD_NUM.get(darts_m.group(1).lower(), None)
+        if n is None:
+            try:
+                n = int(darts_m.group(1))
+            except ValueError:
+                n = None
+        if n is not None and n > 1:
+            darts = n
+
+    save = spell.get("saving_throw_ability")
+    save = _ABILITY_SHORT.get(save, save) if save else None
+
+    if heal:
+        return f"{name} — {dice or '1d8'} HP"
+    if darts:
+        base = f"{darts} darts, {dice} {dtype}".rstrip()
+        return f"{name} — {base} ({save} DC 13)" if save else f"{name} — {base}"
+    if dice:
+        return f"{name} — {dice} {dtype} ({save} DC 13)" if save else f"{name} — {dice} {dtype}"
+    if save:
+        return f"{name} — ({save} DC 13)"
+    return name
+
+
+def spell_to_fields(spell: dict) -> dict:
+    """Convert a raw Open5e v2 spell into a field dict for the library browser."""
+    rng = spell.get("range_text") or spell.get("range")
+    return {
+        "name": _as_text(spell.get("name")) or "Spell",
+        "level": spell["level"] if isinstance(spell.get("level"), int) else 0,
+        "school": _as_text(spell.get("school")),
+        "casting_time": _as_text(spell.get("casting_time")),
+        "range": _as_text(rng),
+        "components": _as_text(spell.get("components")) or "",
+        "duration": _as_text(spell.get("duration")),
+        "desc": _as_text(spell.get("desc")),
+        "cast": _spell_cast_string(spell),
+    }
+
+
+def get_srd_spells(force: bool = False) -> list[dict]:
+    """Fetch + cache the SRD spell library as field dicts."""
+    return get_collection("spells", "spells", spell_to_fields, document_keys=SRD_DOC_KEYS, force=force)

@@ -549,6 +549,44 @@ async def main() -> None:
         await pilot.pause()
         assert len(app.combatants) == 0, len(app.combatants)
 
+        # spellbook (v): add an SRD spell to the selected creature. Guarded so
+        # it still passes in a fresh checkout with no SRD spell cache present.
+        await pilot.press("b")
+        await pilot.pause()
+        await pilot.press(*tuple("goblin shaman"))
+        await pilot.pause()
+        await pilot.press("enter")  # add Goblin Shaman (built-in-only, single match)
+        await pilot.pause()
+        await pilot.press("escape")  # close the monster library
+        await pilot.pause()
+        await pilot.press("up")  # select the creature (_sel was None before)
+        await pilot.pause()
+        assert app._sel is not None, "expected a selected creature"
+        await pilot.press("v")
+        await pilot.pause()
+        # wait for the spellbook worker to mount the screen (avoids a race)
+        for _ in range(10):
+            if app._spell_screen is not None:
+                break
+            await pilot.pause()
+        spl = app._spell_screen
+        if spl is not None and spl._spells:
+            # "mage hand" is a unique SRD spell (Goblin Shaman lacks it), so
+            # Enter on the focused search input adds the single match directly.
+            await pilot.press(*tuple("mage hand"))
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert any("Mage Hand" in s for s in app._sel.spells), app._sel.spells
+            await pilot.press("escape")
+            await pilot.pause()
+            await pilot.press("u")
+            await pilot.pause()
+            assert not any("Mage Hand" in s for s in app._sel.spells), app._sel.spells
+        else:
+            await pilot.press("escape")
+            await pilot.pause()
+
         for p in (appmod.CAMPAIGN_PATH,):
             if os.path.exists(p):
                 os.remove(p)

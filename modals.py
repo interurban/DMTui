@@ -220,6 +220,133 @@ class MonsterLibrary(ModalScreen[None]):
         self.dismiss(None)
 
 
+class SpellBrowser(ModalScreen[None]):
+    """Searchable SRD spellbook — adds an Open5e spell to the selected creature.
+
+    Mirrors MonsterLibrary's large, keep-open UX: type to filter, Enter/a adds
+    the spell to the selected combatant's `spells` list (where it becomes
+    usable in the attack flow), `f` fetches the SRD spell list on demand."""
+
+    BINDINGS = [
+        ("escape", "cancel", "Close"),
+        ("enter", "add_selected", "Add (stays open)"),
+        ("a", "add_selected", "Add"),
+        ("f", "fetch_srd", "Fetch SRD"),
+    ]
+
+    def __init__(self, spells: list[dict] | None, add_fn, fetch_fn, warn_fn) -> None:
+        super().__init__()
+        self._spells = list(spells or [])
+        self._add_fn = add_fn
+        self._fetch_fn = fetch_fn
+        self._warn_fn = warn_fn
+        self._current: list[tuple[str, dict]] = []
+
+    def compose(self) -> ComposeResult:
+        with Container(classes="modal-box library-box"):
+            yield Static("[bold #e6ebf2]SPELLBOOK[/]  [dim]Open5e SRD — adds to selected creature[/]", classes="modal-title")
+            yield Input(placeholder="filter by name, school, or level…", id="lib-search")
+            yield Static("", id="lib-status", classes="modal-hint")
+            yield ListView(id="lib-list")
+            yield Static(
+                "[dim][bold]Enter[/]/[bold]a[/] add to selected (stays open) · [bold]f[/] fetch SRD · [bold]Esc[/] close[/]",
+                classes="modal-hint",
+            )
+
+    def on_mount(self) -> None:
+        self.query_one("#lib-search", Input).focus()
+        self._rebuild()
+
+    def _entries(self) -> list[tuple[str, dict]]:
+        q = self.query_one("#lib-search", Input).value.strip().lower()
+        out: list[tuple[str, dict]] = []
+        for m in self._spells:
+            nm = m.get("name", "?")
+            hay = f"{nm} {m.get('school', '')} level {m.get('level', '')}".lower()
+            if not q or q in hay:
+                lvl = m.get("level", 0)
+                label = f"{nm}   [dim]L{lvl} {m.get('school', '')}[/]"
+                out.append((label, m))
+        return out
+
+    def _rebuild(self) -> None:
+        entries = self._entries()
+        self._current = entries
+        lv = self.query_one("#lib-list", ListView)
+        lv.clear()
+        for label, _ in entries:
+            lv.append(ListItem(Label(label, classes="modal-item")))
+        lv.index = 0 if entries else None
+        total = len(entries)
+        src = f"{len(self._spells)} SRD spells" if self._spells else "SRD not loaded — press f"
+        self.query_one("#lib-status", Static).update(
+            f"[dim]{total} match{'es' if total != 1 else ''} · {src}[/]"
+        )
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id == "lib-search":
+            self._rebuild()
+
+    def on_input_submitted(self, _: Input.Submitted) -> None:
+        if not self._current:
+            return
+        if len(self._current) == 1:
+            self._add(self._current[0][1])
+        else:
+            self.query_one("#lib-list", ListView).focus()
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        idx = event.list_view.index
+        if idx is not None and 0 <= idx < len(self._current):
+            self._add(self._current[idx][1])
+
+    def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
+        idx = event.list_view.index
+        if idx is not None and 0 <= idx < len(self._current):
+            m = self._current[idx][1]
+            info = f"{m.get('name')} · L{m.get('level', 0)} {m.get('school', '')} · {m.get('casting_time', '')} · {m.get('range', '')}"
+            self.query_one("#lib-status", Static).update(f"[dim]{info}[/]")
+
+    def action_add_selected(self) -> None:
+        lv = self.query_one("#lib-list", ListView)
+        idx = lv.index
+        if idx is not None and 0 <= idx < len(self._current):
+            self._add(self._current[idx][1])
+        elif len(self._current) == 1:
+            self._add(self._current[0][1])
+
+    def _add(self, fields: dict) -> None:
+        try:
+            added = self._add_fn(fields)
+        except Exception as exc:
+            self.query_one("#lib-status", Static).update(f"[dim #d95841]Add failed: {exc}[/]")
+            return
+        if added is None:
+            # no creature selected — warn and stay open
+            self._warn_fn()
+            return
+        self.query_one("#lib-status", Static).update(
+            f"[dim #3fae6a]Added {added} — press [bold]Esc[/] when done[/]"
+        )
+        lv = self.query_one("#lib-list", ListView)
+        if lv.index is None and self._current:
+            lv.index = 0
+
+    def action_fetch_srd(self) -> None:
+        self.query_one("#lib-status", Static).update("[dim #a8d0ff]Fetching SRD spells…[/]")
+        try:
+            self._fetch_fn()
+        except Exception:
+            pass
+
+    def update_srd(self, data: list[dict]) -> None:
+        self._spells = list(data or [])
+        self._rebuild()
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
 class HelpModal(ModalScreen[None]):
     BINDINGS = [("escape", "cancel", "Cancel"), ("enter", "cancel", "Cancel")]
 
@@ -233,8 +360,8 @@ class HelpModal(ModalScreen[None]):
                 "  [bold]↑↓[/] select   [bold]←→[/] ±1 HP\n"
                 "  [bold]g[/] grab/place   [bold]n[/] next turn\n"
                 "  [bold]Enter[/]/[bold]a[/] attack   [bold]d[/]/[bold]h[/] type damage/heal\n"
-                "  [bold]c[/] condition   [bold]C[/] campaigns   [bold]m[/] monster   [bold]x[/] remove\n"
-                "  [bold]b[/] monster library   [bold]r[/] roll init   [bold]t[/] set init   [bold]shift+r[/] reset\n"
+                 "  [bold]c[/] condition   [bold]C[/] campaigns   [bold]m[/] monster   [bold]x[/] remove\n"
+                 "  [bold]b[/] monster library   [bold]v[/] spellbook   [bold]r[/] roll init   [bold]t[/] set init   [bold]shift+r[/] reset\n"
                 "  [bold]i[/] import PC   [bold]f[/] find   [bold]e[/] edit   [bold]p[/] add PC\n"
                 "  [bold]ctrl+n[/] new encounter   [bold]?[/] help   [bold]q[/] quit   [bold]ctrl+p[/] palette\n"
                 "  [bold]u[/] undo   [bold]shift+u[/] redo   [bold]s[/] save   [bold]l[/] load\n\n"

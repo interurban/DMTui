@@ -40,7 +40,7 @@ from battle import (
 )
 import ddb
 from ddb import ABILITY_NAMES
-from modals import HelpModal, ImportingModal, ListModal, MonsterLibrary, NumberModal, TextModal
+from modals import HelpModal, ImportingModal, ListModal, MonsterLibrary, NumberModal, SpellBrowser, TextModal
 import srd as srd_client
 from widgets import CombatantRow, InitiativeList, LEFT_W, LogView, MapGrid
 
@@ -200,6 +200,7 @@ class BattleApp(App[None]):
         Binding("C", "campaign", "Campaign"),
         Binding("m", "monster", "Monster"),
         Binding("b", "browse", "Monster lib"),
+        Binding("v", "spell", "Spellbook"),
         Binding("i", "import_pc", "Import PC"),
         Binding("f", "find", "Find"),
         Binding("e", "edit", "Edit"),
@@ -234,6 +235,7 @@ class BattleApp(App[None]):
         self._hp_entry: str | None = None
         self._hp_sign: int = 1
         self._library_screen: MonsterLibrary | None = None
+        self._spell_screen: SpellBrowser | None = None
         self._setup()
 
     # -- lifecycle ---------------------------------------------------------
@@ -1377,6 +1379,56 @@ class BattleApp(App[None]):
             f"{n} (SRD) joins at {coord_name(spot[0], spot[1])} — press [bold]r[/] to roll initiative.",
         )
         return n
+
+    # -- SRD spellbook -------------------------------------------------------
+
+    def action_spell(self) -> None:
+        self.run_worker(self._spell_flow())
+
+    async def _spell_flow(self) -> None:
+        spells = srd_client.load_cache("spells")
+        if spells is None and not os.environ.get("VTT_OFFLINE"):
+            # No cached library yet — open the picker and fetch in the background.
+            self.run_worker(self._fetch_spells_worker())
+        screen = SpellBrowser(
+            spells or [],
+            self._add_spell_entry,
+            self._fetch_spells,
+            self._warn_no_selection,
+        )
+        self._spell_screen = screen
+        await self.push_screen(screen, wait_for_dismiss=True)
+        self._spell_screen = None
+
+    def _add_spell_entry(self, fields: dict) -> str | None:
+        if self._sel is None:
+            return None
+        self._push_undo()
+        self._sel.spells.append(fields["cast"])
+        self._log(f"{self._sel.name} learns {fields['name']} — {fields['cast']}.", kind="import")
+        self._refresh_all()
+        return fields["name"]
+
+    def _warn_no_selection(self) -> None:
+        self._log("Select a creature first (arrows), then add a spell.", kind="warn")
+
+    def _fetch_spells(self) -> None:
+        self.run_worker(self._fetch_spells_worker())
+
+    async def _fetch_spells_worker(self) -> None:
+        self._log("Fetching SRD spells from Open5e…", kind="import")
+        try:
+            data = await asyncio.to_thread(srd_client.get_srd_spells, False)
+        except Exception as exc:
+            self._log(f"SRD spell fetch failed: {exc}", kind="warn")
+            return
+        screen = self._spell_screen
+        if screen is not None:
+            try:
+                screen.update_srd(data)
+            except Exception:
+                pass
+        self._log(f"Loaded {len(data)} SRD spells from Open5e.", kind="import")
 
     def action_remove(self) -> None:
         if self._sel is not None:
