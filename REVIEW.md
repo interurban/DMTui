@@ -1,12 +1,104 @@
 # Code review — findings & fixes
 
-Comprehensive read-only review by two staff developers (one on
-`battle.py` / `ddb.py` / `tests.py`, one on `app.py` / `modals.py` /
-`widgets.py` / `smoke.py`). Both verified the full test + smoke suites pass
-before review. Findings below are ordered by severity; everything was fixed in
-the same pass and locked in with regression tests.
+Two comprehensive read-only review passes, each by two staff developers (one
+on `battle.py` / `ddb.py` / `tests.py`, one on `app.py` / `modals.py` /
+`widgets.py` / `smoke.py`). Both reviews verified the full test + smoke suites
+pass before reviewing. Findings are ordered by severity; everything was fixed
+in the same pass and locked in with regression tests.
 
-## Critical
+## Review pass 2 — findings & fixes
+
+### Critical
+
+- None.
+
+### Major
+
+### M1. "Healing Word" wasn't detected as a heal
+`battle.py:_HEAL_RE` — `\bheal\b` requires a word boundary after "heal", so
+"Healing Word" (and "Regenerate", "Healing Spirit", …) never matched and
+**damaged** its target instead of healing. Only "Cure Wounds" was covered by
+tests, so it slipped through pass 1.
+**Fix:** match word prefixes — `\b(heal\w*|cure\w*|restore\w*|mend\w*|regain\w*|hit points|hp)\b`.
+`test_resolve_spell_healing_word` locks it in.
+
+### M2. The DDB hit-dice sort was a no-op
+`ddb.py` — `sorted(hd.items(), key=_int)` passed each `(die, count)` *tuple* to
+`_int`, which swallowed the type error and returned the `0` default, so every
+key sorted equal and order was dict-insertion order. The multi-hit-dice test
+passed only because its fixture happened to insert `"8"` first.
+**Fix:** `key=lambda kv: -_int(kv[0])` (largest die first). A regression test
+feeds the dict smallest-first and asserts stable `"3d8, 2d6"` output.
+
+### Minor
+
+- **Save-DC spells with no dice dropped the save** — save parsing lived inside
+  the dice-only branch, so "Hold Person — (Wis DC 15)" reported a bare `damage
+  0` with no save. The save block now runs for any spell hint (not just those
+  with dice), and `_apply_attack_result` reports saved/failed even at 0 damage.
+- **A heal carrying a `(Con DC N)` hint got halved** on a "successful" save.
+  The save branch is now guarded with `not healing` — heals are never halved.
+- **`N darts` matching was too loose** — `N ×`/`N times`/`0 darts` multiplied
+  dice too. Scoped to an explicit `darts?` keyword with `N > 1`.
+- **Downed/dead targets logged "is already at max HP."** — the `applied == 0`
+  early-return hardcoded a heal message. Now branches on the delta sign
+  ("already at max HP" vs "is already down").
+- **`action_next_turn` never advanced the round with everyone dead** — the
+  `nxt <= start` wrap only fired when the scan ended on a living creature.
+  Now also `or scanned == n` when the scan exhausts the whole list. Smoke
+  covers it (kill everyone, `n` still ticks the round).
+- **A missed attack pushed a phantom undo entry** — `_apply_attack_result`
+  pushed undo unconditionally, so a miss / 0-damage spell / full-HP heal left
+  a no-op entry and cleared redo. Now only pushes undo when HP actually
+  changed. Smoke asserts the undo stack is untouched after a nat-1 miss.
+- **Undoing a load produced a hybrid state** — combatants reverted but the
+  *loaded* round/turn stuck around. Snapshots now carry a `restore_nav` flag:
+  world-replacing ops (load, reset, new encounter) restore round/turn on undo;
+  plain mutations keep the current navigation. The flag propagates through
+  undo *and* redo symmetrically. Verified by pilot (undo reverts round 99 → A,
+  redo re-applies A).
+- **`action_load` pushed a redundant undo entry when restore failed** — the
+  undo snapshot is now taken first and only pushed after a successful restore.
+- **`ctrl+p` palette was advertised but never bound** — the message bar and
+  help listed it; nothing handled it. The binding is now added.
+- **`find` couldn't parse Excel-style coordinates** — `@AA1` failed the
+  single-letter parser. `_parse_coord` mirrors `coord_name` for arbitrary
+  column lengths.
+- **`_messages` grew unboundedly** — capped at 200 entries.
+- **Small terminals clipped the map** — `MAP_ROWS` floored at 5 rendered more
+  lines than a short map widget holds. Floor lowered to 1 so rendering always
+  matches available rows.
+- **Heal spells logged the un-clamped amount** — a target 2 HP from max
+  "restored 12 HP". The log and undo now use the clamped applied delta.
+
+## DDB import hardening (pass 2, all tested)
+
+- **The flat damage bonus was double-counted in the to-hit default** — without
+  an explicit `attackBonus`, to-hit was `stat + prof + dmg_bonus`; a
+  `damageBonus: 3` Greataxe showed `+8 · 1d12+6`. In 5e the flat damage bonus
+  doesn't help you hit, so the default is now `stat + prof` (`+5 · 1d12+6`).
+- **Negative to-hit rendered `"+-2"`** (and `_ATK_RE` folded the stray `+` into
+  the weapon name) — now `f"{to_hit:+d}"` → `"Cursed Blade -2"`.
+- **Heavy armour applied a negative DEX penalty** (`min(dex_mod, 0)`); 5e
+  heavy armour ignores DEX entirely. Now `+0` for `dex_cap == 0`.
+- **A 200 with a non-JSON body** raised a raw `JSONDecodeError`; now wrapped in
+  a friendly `ValueError`.
+
+## Deliberately not changed (pass 2)
+
+- **`_restore` re-maps the turn by name on keep_nav** — duplicate PC names
+  resolve to the first match on undo. In practice names are unique; the risk is
+  a silent turn jump, never a crash.
+- **Undo of a move restores grab mode** (`_moving` back on) — arguably
+  intended: you're still holding the token.
+- **`CombatantRow` overflows at very narrow widths** — a `name_w` floor of 8 at
+  an 80-column terminal; cosmetic, out of scope.
+- **`action_help` double-wrapping / `_restore` index validation** — pass 1
+  already fixed these; pass 2 confirmed no regression.
+
+## Review pass 1 — findings & fixes
+
+### Critical
 
 - None.
 

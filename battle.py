@@ -117,9 +117,9 @@ _ATK_RE = re.compile(
     r"^(?P<name>.*?)\s*(?P<bonus>[+-]\d+)\s*·\s*(?P<dice>\d*d\d+(?:[+-]\d+)?)\s*(?P<dtype>\w+)?$"
 )
 _DICE_RE = re.compile(r"\d*d\d+(?:[+-]\d+)?")
-_HEAL_RE = re.compile(r"\b(heal|heals|cure|cures|restore|restores|mend|regain|hit points|hp)\b", re.IGNORECASE)
+_HEAL_RE = re.compile(r"\b(heal\w*|cure\w*|restore\w*|mend\w*|regain\w*|hit points|hp)\b", re.IGNORECASE)
 _SAVE_RE = re.compile(r"\(([a-z]+)\s+dc\s*(\d+)\)", re.IGNORECASE)
-_DARTS_RE = re.compile(r"(\d+)\s*(?:darts?|×|times?)\b", re.IGNORECASE)
+_DARTS_RE = re.compile(r"(\d+)\s*darts?\b", re.IGNORECASE)
 _SAVE_ABILITY_ID = {"str": 1, "dex": 2, "con": 3, "int": 4, "wis": 5, "cha": 6}
 
 
@@ -175,34 +175,33 @@ def resolve_attack(attacker: Combatant, action: str, target: Combatant, rng=rand
             "dice": rolls, "dice_bonus": dmg_bonus, "dtype": dtype,
         }
     dm = _DICE_RE.search(action)
+    healing = bool(_HEAL_RE.search(action))
+    save_m = _SAVE_RE.search(action)
+    total, rolls, dmg_bonus = 0, [], 0
     if dm is not None:
         total, rolls, dmg_bonus = roll_dice(dm.group(0), rng)
-        healing = bool(_HEAL_RE.search(action))
         darts_m = _DARTS_RE.search(action)
-        if darts_m and not healing:
+        if darts_m is not None and not healing and int(darts_m.group(1)) > 1:
             for _ in range(int(darts_m.group(1)) - 1):
                 extra, extra_rolls, _ = roll_dice(dm.group(0), rng)
                 total += extra
                 rolls = rolls + extra_rolls
-        save_m = _SAVE_RE.search(action)
-        if save_m is not None:
-            ability = save_m.group(1).lower()
-            aid = _SAVE_ABILITY_ID.get(ability)
-            dc = int(save_m.group(2))
-            save_mod = target.save(aid) if aid is not None else None
-            save_roll = rng.randint(1, 20) + (save_mod if save_mod is not None else 0)
-            saved = save_roll >= dc
-            if saved:
-                total = max(0, total // 2)
-            return {
-                "kind": "spell", "name": action, "hit": True, "crit": False,
-                "damage": total, "dice": rolls, "dice_bonus": dmg_bonus, "heal": healing,
-                "save": {"ability": ability, "dc": dc, "roll": save_roll, "saved": saved},
-            }
-        return {"kind": "spell", "name": action, "hit": True, "crit": False,
-                "damage": total, "dice": rolls, "dice_bonus": dmg_bonus, "heal": healing}
+    if save_m is not None and not healing:
+        ability = save_m.group(1).lower()
+        aid = _SAVE_ABILITY_ID.get(ability)
+        dc = int(save_m.group(2))
+        save_mod = target.save(aid) if aid is not None else None
+        save_roll = rng.randint(1, 20) + (save_mod if save_mod is not None else 0)
+        saved = save_roll >= dc
+        if saved:
+            total = max(0, total // 2)
+        return {
+            "kind": "spell", "name": action, "hit": True, "crit": False,
+            "damage": total, "dice": rolls, "dice_bonus": dmg_bonus, "heal": healing,
+            "save": {"ability": ability, "dc": dc, "roll": save_roll, "saved": saved},
+        }
     return {"kind": "spell", "name": action, "hit": True, "crit": False,
-            "damage": 0, "dice": [], "dice_bonus": 0, "heal": False}
+            "damage": total, "dice": rolls, "dice_bonus": dmg_bonus, "heal": healing}
 
 
 def coord_name(x: int, y: int) -> str:
@@ -504,7 +503,9 @@ def build_encounter() -> list[Combatant]:
     player has been damaging (regression from the code-review pass)."""
     combatants = [deepcopy(c) for c in (PARTY + ENCOUNTER_MONSTERS)]
     for c in combatants:
-        spot = START_POSITIONS.get(c.name) or find_free_spot(combatants)
+        spot = START_POSITIONS.get(c.name)
+        if spot is None:
+            spot = find_free_spot(combatants)
         if spot is None:
             spot = (0, 0)
         c.x, c.y = spot

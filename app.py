@@ -46,6 +46,20 @@ from widgets import CombatantRow, InitiativeList, LEFT_W, LogView, MapGrid
 
 SAVE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "encounter.json")
 
+
+def _parse_coord(s: str) -> tuple[int, int] | None:
+    """Parse an Excel-style map coordinate like 'B3' or 'AA1' -> (x, y)."""
+    s = s.strip().upper()
+    i = 0
+    while i < len(s) and s[i].isalpha():
+        i += 1
+    if i == 0 or not s[i:].isdigit():
+        return None
+    x = 0
+    for ch in s[:i]:
+        x = x * 26 + (ord(ch) - ord("A") + 1)
+    return (x - 1, int(s[i:]) - 1)
+
 LOG_COLORS = {
     "info": "#c9d3e0",
     "warn": "#d95841",
@@ -181,6 +195,7 @@ class BattleApp(App[None]):
         Binding("shift+u", "redo", "Redo"),
         Binding("s", "save", "Save"),
         Binding("l", "load", "Load"),
+        Binding("ctrl+p", "command_palette", "Palette"),
         Binding("q", "quit", "Quit"),
     ]
 
@@ -272,8 +287,10 @@ class BattleApp(App[None]):
             "moving": self._moving,
         }
 
-    def _push_undo(self) -> None:
-        self._undo.append(self._snapshot())
+    def _push_undo(self, restore_nav: bool = False) -> None:
+        snap = self._snapshot()
+        snap["restore_nav"] = restore_nav
+        self._undo.append(snap)
         if len(self._undo) > 50:
             self._undo.pop(0)
         self._redo.clear()
@@ -319,16 +336,22 @@ class BattleApp(App[None]):
         if not self._undo:
             self._log("Nothing to undo.", kind="warn")
             return
-        self._redo.append(self._snapshot())
-        self._restore(self._undo.pop())
+        snap = self._undo.pop()
+        cur = self._snapshot()
+        cur["restore_nav"] = snap.get("restore_nav", False)
+        self._redo.append(cur)
+        self._restore(snap, keep_nav=not snap.get("restore_nav", False))
         self._log("Undid last change.", kind="select")
 
     def action_redo(self) -> None:
         if not self._redo:
             self._log("Nothing to redo.", kind="warn")
             return
-        self._undo.append(self._snapshot())
-        self._restore(self._redo.pop())
+        snap = self._redo.pop()
+        cur = self._snapshot()
+        cur["restore_nav"] = snap.get("restore_nav", False)
+        self._undo.append(cur)
+        self._restore(snap, keep_nav=not snap.get("restore_nav", False))
         self._log("Redid change.", kind="select")
 
     def action_save(self) -> None:
@@ -353,12 +376,17 @@ class BattleApp(App[None]):
         if not isinstance(snap, dict) or not isinstance(snap.get("combatants"), list):
             self._log("Save file corrupt: expected an encounter snapshot.", kind="warn")
             return
+        before = self._snapshot()
         try:
-            self._push_undo()
             self._restore(snap, keep_nav=False)
         except (TypeError, ValueError, KeyError) as exc:
             self._log(f"Save file corrupt: {exc}", kind="warn")
             return
+        before["restore_nav"] = True
+        self._undo.append(before)
+        if len(self._undo) > 50:
+            self._undo.pop(0)
+        self._redo.clear()
         self._log(f"Loaded encounter — {len(self.combatants)} creatures, round {self.round}.", kind="import")
 
     # -- rows & refresh ----------------------------------------------------
@@ -407,7 +435,7 @@ class BattleApp(App[None]):
         MAP_COLS = min(30, max(5, avail_w // cell_w))
         # the map renders a header line + MAP_ROWS data lines, so the grid must
         # hold one more line than the row count (off-by-one: last row was clipped)
-        MAP_ROWS = min(40, max(5, grid.size.height - 1))
+        MAP_ROWS = min(40, max(1, grid.size.height - 1))
         grid.cell_w = cell_w
         grid.update(self._map_text(cell_w))
         self.query_one("#map-title", Static).update(self._map_title_text())
@@ -498,6 +526,8 @@ class BattleApp(App[None]):
 
     def _log(self, text: str, kind: str = "info", in_log: bool = True) -> None:
         self._messages.append((text, kind, in_log))
+        if len(self._messages) > 200:
+            self._messages.pop(0)
         self._refresh_log()
 
     # -- battle map ----------------------------------------------------------
@@ -674,9 +704,10 @@ class BattleApp(App[None]):
         while scanned < n and not self.combatants[nxt].alive:
             nxt = (nxt + 1) % n
             scanned += 1
-        # if every living creature was skipped we've wrapped around the order,
-        # including past the current turn — that begins a new round
-        if nxt <= start:
+        # if every living creature was skipped — including wrapping past the
+        # current turn, or the whole list with everyone dead — the scan began
+        # or returned to a new round
+        if nxt <= start or scanned == n:
             self.round += 1
         self._turn = self.combatants[nxt]
         self._log(f"Turn → {self._turn.name} (round {self.round})", kind="turn")
@@ -768,7 +799,10 @@ class BattleApp(App[None]):
         new_hp = max(0, min(c.max_hp, c.hp + delta))
         applied = new_hp - before
         if applied == 0:
-            self._log(f"{c.name} is already at max HP.", kind="heal")
+            if delta > 0:
+                self._log(f"{c.name} is already at max HP.", kind="heal")
+            else:
+                self._log(f"{c.name} is already down.", kind="damage")
             return
         self._push_undo()
         c.hp = new_hp
@@ -819,53 +853,65 @@ class BattleApp(App[None]):
         self._apply_attack_result(c, target, result)
 
     def _apply_attack_result(self, c: Combatant, target: Combatant, res: dict) -> None:
-        self._push_undo()
         if res["kind"] == "attack":
             head = f"{c.name}: {res['name']} → [bold #e6ebf2]{res['roll']}[/] vs AC {target.ac} — "
             if not res["hit"]:
                 self._log(head + "[bold #8a93a3]miss[/].", kind="damage")
-            else:
-                parts = " + ".join(str(r) for r in res["dice"])
-                if res["dice_bonus"]:
-                    parts += f" {res['dice_bonus']:+d}"
-                crit = " [bold #e0c04c]CRIT![/]" if res["crit"] else ""
-                self._log(
-                    head + f"[bold #3fae6a]hit[/] for [bold #e05a5a]{res['damage']} damage[/] ({parts}){crit}",
-                    kind="damage",
-                )
-        else:
+                return
             parts = " + ".join(str(r) for r in res["dice"])
             if res["dice_bonus"]:
                 parts += f" {res['dice_bonus']:+d}"
-            if res["damage"]:
-                if res.get("heal", False):
-                    self._log(
-                        f"{c.name} casts {res['name']} on {target.name} — "
-                        f"[bold #3fae6a]{res['damage']} HP restored[/] ({parts}).",
-                        kind="heal",
-                    )
-                else:
-                    save_note = ""
-                    if res.get("save"):
-                        s = res["save"]
-                        save_note = " [dim]saved[/]" if s["saved"] else f" [dim]failed ({s['roll']} vs DC {s['dc']})[/]"
-                    self._log(
-                        f"{c.name} casts {res['name']} — [bold #e0c04c]{res['damage']} damage[/] "
-                        f"to {target.name} ({parts}).{save_note}",
-                        kind="monster",
-                    )
-            else:
-                self._log(f"{c.name} casts {res['name']} on {target.name}.", kind="monster")
-        if res["damage"]:
+            crit = " [bold #e0c04c]CRIT![/]" if res["crit"] else ""
+            self._log(
+                head + f"[bold #3fae6a]hit[/] for [bold #e05a5a]{res['damage']} damage[/] ({parts}){crit}",
+                kind="damage",
+            )
+            self._push_undo()
             was_alive = target.alive
-            if res.get("heal", False):
-                target.hp = min(target.max_hp, target.hp + res["damage"])
-            else:
-                target.hp = max(0, min(target.max_hp, target.hp - res["damage"]))
-                if was_alive and not target.alive:
-                    target.conditions.discard("concentrating")
-                    self._log(self._rng.choice(DEATH_LINES).format(name=target.name), kind="death")
-        self._refresh_all()
+            target.hp = max(0, min(target.max_hp, target.hp - res["damage"]))
+            if was_alive and not target.alive:
+                target.conditions.discard("concentrating")
+                self._log(self._rng.choice(DEATH_LINES).format(name=target.name), kind="death")
+            self._refresh_all()
+            return
+        # spell
+        parts = " + ".join(str(r) for r in res["dice"])
+        if res["dice_bonus"]:
+            parts += f" {res['dice_bonus']:+d}"
+        save_note = ""
+        if res.get("save"):
+            s = res["save"]
+            save_note = " [dim]saved[/]" if s["saved"] else f" [dim]failed ({s['roll']} vs DC {s['dc']})[/]"
+        if res.get("heal", False):
+            applied = min(target.max_hp, target.hp + res["damage"]) - target.hp
+            if applied <= 0:
+                self._log(f"{target.name} is already at full HP.", kind="heal")
+                return
+            self._log(
+                f"{c.name} casts {res['name']} on {target.name} — "
+                f"[bold #3fae6a]{applied} HP restored[/] ({parts}).",
+                kind="heal",
+            )
+            self._push_undo()
+            target.hp += applied
+            self._refresh_all()
+            return
+        if res["damage"]:
+            self._log(
+                f"{c.name} casts {res['name']} — [bold #e0c04c]{res['damage']} damage[/] "
+                f"to {target.name} ({parts}).{save_note}",
+                kind="monster",
+            )
+            self._push_undo()
+            was_alive = target.alive
+            target.hp = max(0, min(target.max_hp, target.hp - res["damage"]))
+            if was_alive and not target.alive:
+                target.conditions.discard("concentrating")
+                self._log(self._rng.choice(DEATH_LINES).format(name=target.name), kind="death")
+            self._refresh_all()
+            return
+        # control-style spell with no damage: report it, nothing to apply
+        self._log(f"{c.name} casts {res['name']} on {target.name}.{save_note}", kind="monster")
 
     # -- find a combatant --------------------------------------------------------
 
@@ -881,10 +927,9 @@ class BattleApp(App[None]):
             return
         q = query.strip()
         if q.startswith("@"):
-            c = q[1:].strip().upper()
-            if len(c) >= 2 and c[0].isalpha() and c[1:].isdigit():
-                x = ord(c[0]) - ord("A")
-                y = int(c[1:]) - 1
+            pos = _parse_coord(q[1:])
+            if pos is not None:
+                x, y = pos
                 target = next((m for m in self.combatants if m.x == x and m.y == y), None)
                 if target is not None:
                     self._sel = target
@@ -1167,7 +1212,7 @@ class BattleApp(App[None]):
             picked = await self.push_screen(ListModal("NEW ENCOUNTER?", options), wait_for_dismiss=True)
             if picked != "yes":
                 return
-        self._push_undo()
+        self._push_undo(restore_nav=True)
         self.combatants = []
         self.round = 1
         self._turn = None
@@ -1179,7 +1224,7 @@ class BattleApp(App[None]):
     # -- misc ---------------------------------------------------------------
 
     def action_reset(self) -> None:
-        self._push_undo()
+        self._push_undo(restore_nav=True)
         self._reset_encounter()
         self._log("Encounter reset to round 1.")
 

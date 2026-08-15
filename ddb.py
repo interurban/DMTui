@@ -79,6 +79,10 @@ def fetch_character_data(character_id: int) -> dict:
     try:
         with urllib.request.urlopen(request, timeout=15) as response:
             payload = json.loads(response.read().decode("utf-8"))
+    except ValueError as exc:
+        if isinstance(exc, json.JSONDecodeError):
+            raise ValueError(f"D&D Beyond returned a non-JSON body: {exc}") from exc
+        raise
     except urllib.error.HTTPError as exc:
         try:
             detail = json.loads(exc.read().decode("utf-8"))
@@ -189,7 +193,13 @@ def extract_combatant(character_id: int, data: dict) -> Combatant:
                 value = mod.get("value")
             if value:
                 ac += _int(value)
-    ac += dex_mod if not wearing_armor else (dex_mod if dex_cap is None else min(dex_mod, dex_cap))
+    # heavy armour ignores the DEX modifier entirely (5e); light/moderate cap it
+    if not wearing_armor:
+        ac += dex_mod
+    elif dex_cap == 0:
+        ac += 0
+    else:
+        ac += dex_mod if dex_cap is None else min(dex_mod, dex_cap)
 
     race = ""
     race_obj = character.get("race")
@@ -257,7 +267,7 @@ def extract_combatant(character_id: int, data: dict) -> Combatant:
 
     hd = character.get("hitPointDice")
     if isinstance(hd, dict):
-        hd = ", ".join(f"{v}d{k}" for k, v in sorted(hd.items(), key=_int))
+        hd = ", ".join(f"{v}d{k}" for k, v in sorted(hd.items(), key=lambda kv: -_int(kv[0])))
     hit_dice = hd if isinstance(hd, str) else ""
 
     attacks: list[str] = []
@@ -281,10 +291,11 @@ def extract_combatant(character_id: int, data: dict) -> Combatant:
         stat_mod = dex_mod if defn.get("range") else str_mod
         dmg_bonus = _int(defn.get("damageBonus"))
         dtype = str(defn.get("damageType") or "")
-        # when DDB reports an explicit attack bonus (magic weapons etc.) trust it
-        to_hit = _int(defn.get("attackBonus"), stat_mod + prof + dmg_bonus)
+        # when DDB reports an explicit attack bonus (magic weapons etc.) trust it;
+        # otherwise the flat damage bonus does not help you hit (5e)
+        to_hit = _int(defn.get("attackBonus"), stat_mod + prof)
         attacks.append(
-            f"{(defn.get('name') or '?')} +{to_hit} · {dmg}{stat_mod + dmg_bonus:+d} {dtype[:3].lower()}"
+            f"{(defn.get('name') or '?')} {to_hit:+d} · {dmg}{stat_mod + dmg_bonus:+d} {dtype[:3].lower()}"
         )
 
     traits: list[str] = []

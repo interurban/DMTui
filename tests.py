@@ -137,6 +137,57 @@ def test_resolve_spell_without_dice():
     assert res["kind"] == "spell" and res["damage"] == 0 and res["hit"]
 
 
+def test_resolve_spell_healing_word():
+    atk, tgt = dent(), hobgoblin()
+    # 'Healing Word' must be detected as a heal (regression: \bheal\b missed
+    # the 'healing' word prefix and dealt damage instead)
+    res = resolve_attack(atk, "Healing Word — 1d4+3 HP", tgt, Seq([4]))
+    assert res["kind"] == "spell" and res["heal"] is True
+    assert res["damage"] == 7
+
+
+def test_resolve_crit_zero_bonus():
+    atk, tgt = dent(), hobgoblin()
+    # the crit re-roll strips the flat bonus ('+0' included) so it is added once
+    res = resolve_attack(atk, "Longsword +7 · 1d8+0 sl", tgt, Seq([20, 3, 5]))
+    assert res["crit"] and res["damage"] == 3 + 5 + 0 == 8
+    assert res["dice"] == [3, 5]
+
+
+def test_resolve_crit_negative_bonus():
+    atk, tgt = dent(), hobgoblin()
+    res = resolve_attack(atk, "Longsword +5 · 1d8-1 sl", tgt, Seq([20, 3, 5]))
+    assert res["crit"] and res["damage"] == 3 + 5 - 1 == 7
+    assert res["dice"] == [3, 5]
+
+
+def test_resolve_heal_with_save_hint_not_halved():
+    atk, tgt = dent(), hobgoblin()
+    # a heal that also carries a (Con DC N) hint must NOT be halved by a save;
+    # the save is reported but ignored for healing spells
+    res = resolve_attack(atk, "Regenerate — 4d8 HP (Con DC 12)", tgt, Seq([1, 2, 3, 4, 20]))
+    assert res["kind"] == "spell" and res["heal"] is True
+    assert res["damage"] == 10
+    assert res.get("save") is None
+
+
+def test_resolve_spell_save_without_dice():
+    atk, tgt = dent(), hobgoblin()
+    # control spells with a save hint but no dice still roll the save
+    res = resolve_attack(atk, "Hold Person — (Wis DC 15)", tgt, Seq([3]))
+    assert res["kind"] == "spell" and res["damage"] == 0
+    assert res["save"]["dc"] == 15 and res["save"]["saved"] is False
+
+
+def test_resolve_spell_times_not_multiplied():
+    atk, tgt = dent(), hobgoblin()
+    # only an explicit 'N darts' keyword multiplies (regression: '3 ×' used to
+    # multiply every damage spell that mentioned a number + times sign)
+    res = resolve_attack(atk, "Magic Missile — 3 × 1d4+1 force", tgt, Seq([2]))
+    assert res["kind"] == "spell" and not res["heal"]
+    assert res["damage"] == 3 and res["dice"] == [2]
+
+
 def test_short_label():
     assert short_label("Goblin 2") == "G2"
     assert short_label("Syrva") == "Syr"
@@ -336,6 +387,20 @@ def test_extract_combatant_multi_hit_dice():
     assert c.hit_dice == "3d8, 2d6"
 
 
+def test_extract_combatant_hit_dice_sorted_descending():
+    data = {
+        "character": {
+            "name": "Dicey",
+            "stats": {"1": 10, "2": 10, "3": 10, "4": 10, "5": 10, "6": 10},
+            # inserted smallest-first; output must still be largest-die-first
+            "hitPointDice": {"6": 2, "8": 3},
+            "modifiers": {},
+        }
+    }
+    c = extract_combatant(4, data)
+    assert c.hit_dice == "3d8, 2d6"
+
+
 def test_extract_combatant_stats_dict_unordered():
     data = {
         "character": {
@@ -384,6 +449,46 @@ def test_extract_combatant_attack_bonus_trusted():
     }
     c = extract_combatant(7, data)
     assert c.attacks[0].startswith("Flame Tongue +9 · 2d6"), c.attacks
+
+
+def test_extract_combatant_negative_attack_bonus_renders():
+    data = {
+        "character": {
+            "name": "Vexed",
+            "stats": {"1": 16, "2": 10, "3": 10, "4": 10, "5": 10, "6": 10},
+            "baseHitPoints": 10,
+            "inventory": [
+                {"equipped": True, "definition": {
+                    "name": "Cursed Blade", "damage": {"diceString": "1d8"}, "damageType": "Slashing",
+                    "attackBonus": -2,
+                }},
+            ],
+            "modifiers": {},
+        }
+    }
+    c = extract_combatant(7, data)
+    assert c.attacks[0].startswith("Cursed Blade -2 · 1d8"), c.attacks
+
+
+def test_extract_combatant_damage_bonus_not_double_counted_to_hit():
+    data = {
+        "character": {
+            "name": "Smash",
+            "stats": {"1": 16, "2": 10, "3": 10, "4": 10, "5": 10, "6": 10},
+            "baseHitPoints": 10,
+            "proficiencyBonus": 2,
+            "inventory": [
+                {"equipped": True, "definition": {
+                    "name": "Greataxe", "damage": {"diceString": "1d12"}, "damageType": "Slashing",
+                    "damageBonus": 3,
+                }},
+            ],
+            "modifiers": {},
+        }
+    }
+    c = extract_combatant(7, data)
+    # the flat +3 damage bonus helps damage, not the to-hit roll
+    assert c.attacks[0].startswith("Greataxe +5 · 1d12+6"), c.attacks
 
 
 def test_extract_combatant_negative_removed_hp_clamped():

@@ -3,6 +3,30 @@
 Sprint log for the Battle Tracker — a single-screen terminal combat tracker
 for D&D 5e DMs (Textual). Run: `.venv/bin/python app.py`.
 
+## Second review fix pass (complete)
+
+A second comprehensive review by two fresh staff developers (engine + parser,
+and TUI + smoke). Full findings live in `REVIEW.md` under "Review pass 2".
+Tests went 32 → 41; every fix below is locked in with a regression test:
+
+- "Healing Word" (and Regenerate, Healing Spirit, …) now heals — the heal
+  regex missed the "healing" word prefix and *damaged* its target instead.
+- DDB hit-dice sort was a no-op (sorted tuples, not die sizes); output is now
+  stable largest-die-first regardless of key order.
+- Spells: save hints now work even with no dice (Hold Person logs the save);
+  heals can't be halved by a save hint; only an explicit "N darts" multiplies.
+- Downed targets log "is already down" instead of "already at max HP".
+- The round always advances on `n`, even when everyone is dead (scan wrap).
+- A missed attack no longer pushes a phantom undo entry.
+- Undoing a load/reset/new-encounter fully restores the previous world
+  (round + turn), not a hybrid; redo re-applies it symmetrically.
+- Load pushes its undo entry only after a successful restore.
+- `ctrl+p` palette binding added (was advertised, never bound).
+- `@AA1`-style Excel coordinates now work in `find`.
+- Battle log capped at 200 messages; map no longer clips on small terminals.
+- DDB import: flat damage bonus no longer double-counted into to-hit, negative
+  to-hit renders cleanly, heavy armour ignores DEX, non-JSON bodies wrapped.
+
 ## Review fix pass — comprehensive code review (complete)
 
 Two staff developers reviewed the whole codebase (engine + parser, and the

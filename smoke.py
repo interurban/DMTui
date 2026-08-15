@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import random
 
 from app import BattleApp
 from ddb import parse_ddb_url
@@ -9,6 +10,19 @@ from modals import HelpModal
 from textual.widgets import Input, Static
 
 SHOTS = os.path.join(os.path.dirname(__file__), "shots")
+
+
+class _Seq:
+    """Canned RNG stub for smoke: yields fixed values from randint."""
+
+    def __init__(self, values):
+        self._v = iter(values)
+
+    def randint(self, a, b):
+        return next(self._v)
+
+    def choice(self, values):
+        return values[0]
 
 
 async def main() -> None:
@@ -151,8 +165,10 @@ async def main() -> None:
         assert "Turn →" in log_txt, log_txt
         app.save_screenshot(os.path.join(SHOTS, "16-turn.png"))
 
-        # resolve an attack: dent's Longsword vs the first living creature
-        app._rng = __import__("random").Random(7)
+        # resolve a guaranteed hit: dent's Longsword vs the first living creature.
+        # a canned RNG forces d20=15 (a solid hit, no crit) then d8=3, so the
+        # damage is deterministic and the assert can't pass vacuously on a miss.
+        app._rng = _Seq([15, 3])
         dent = [c for c in app.combatants if c.kind == "PC"][0]
         app._sel = dent
         await pilot.pause()
@@ -168,8 +184,8 @@ async def main() -> None:
         await pilot.press("enter")          # pick first living target
         await pilot.pause()
         log_txt = str(app.query_one("#log-content", Static).content)
-        assert "→" in log_txt and ("hit" in log_txt or "miss" in log_txt), log_txt
-        assert target.hp <= hp_before, (target.hp, hp_before)
+        assert "hit" in log_txt, log_txt
+        assert target.hp == hp_before - 7, (target.hp, hp_before)  # d8=3 + flat +4
         app.save_screenshot(os.path.join(SHOTS, "23-attack-resolved.png"))
 
         # undo the attack (hp restored), then redo it (hp applied again).
@@ -186,6 +202,23 @@ async def main() -> None:
         t_redone = [c for c in app.combatants if c.name == target.name][0]
         assert t_redone.hp == hp_after, (t_redone.hp, hp_after)
         app.save_screenshot(os.path.join(SHOTS, "24-undo-redo.png"))
+
+        # a miss must not push an undo entry (regression: phantom undo on a
+        # no-op attack) — natural 1 always misses
+        app._rng = _Seq([1])
+        undo_len = len(app._undo)
+        app._sel = [c for c in app.combatants if c.kind == "PC"][0]
+        miss_target = [t for t in app.combatants if t.alive][0]
+        hp_m = miss_target.hp
+        await pilot.press("a")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert len(app._undo) == undo_len, (len(app._undo), undo_len)
+        assert miss_target.hp == hp_m, (miss_target.hp, hp_m)
+        app._rng = random.Random(7)  # back to a real RNG for the rest of the flow
 
         # save the session to disk, damage a PC, then load it back
         import app as appmod
@@ -355,6 +388,21 @@ async def main() -> None:
         await pilot.press("shift+u")
         await pilot.pause()
         assert len(app.combatants) == 0, len(app.combatants)
+
+        # with everyone dead, advancing must still begin a new round — the
+        # dead-skip scan wraps the whole list (regression: round never advanced)
+        await pilot.press("r")
+        await pilot.pause()
+        for c in app.combatants:
+            c.hp = 0
+        r0 = app.round
+        await pilot.press("n")
+        await pilot.pause()
+        assert app.round == r0 + 1, (app.round, r0)
+        app.combatants = []
+        app._turn = app._sel = None
+        app._moving = False
+        app._rebuild_rows()
 
         # monster library browser (b): type a filter, Enter adds the match
         await pilot.press("b")

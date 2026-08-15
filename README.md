@@ -17,7 +17,7 @@ python -m venv .venv
 ```
 
 `?` opens the in-app key guide. `CHANGELOG.md` is the sprint log; `REVIEW.md`
-documents the staff code review and every fix that came out of it.
+documents both staff code-review passes and every fix that came out of them.
 
 ## Keys
 
@@ -37,7 +37,7 @@ documents the staff code review and every fix that came out of it.
 | `i` | import a PC from a D&D Beyond URL |
 | `p` | add a PC from a name |
 | `e` | edit the selected creature (name, HP, AC, init mod, role, note, scores) |
-| `f` | find a creature by name or coordinate |
+| `f` | find a creature by name or map coordinate (`@B3`, `@AA1`) |
 | `u` / `Shift+u` | undo / redo |
 | `s` / `l` | save / load the encounter to `encounter.json` |
 | `Ctrl+n` | new blank encounter |
@@ -48,8 +48,10 @@ documents the staff code review and every fix that came out of it.
 Weapon lines (`Longsword +7 · 1d8+4 sl`) roll `d20 + bonus` vs the target's AC;
 a natural 20 crits (dice doubled, the flat bonus once) and a natural 1 always
 misses. Spells are best-effort: `(Dex DC 12)` hints give the target a saving
-throw (half damage on a success), heal/cure/regain spells restore HP instead of
-dealing damage, and `3 darts` lines (Magic Missile) roll the dice three times.
+throw (half damage on a success) and are still rolled for no-damage control
+spells (e.g. Hold Person), heal/cure/regain spells restore HP instead of
+dealing damage (save hints never halve a heal), and `3 darts` lines
+(Magic Missile) roll the dice three times.
 
 ## Dev
 
