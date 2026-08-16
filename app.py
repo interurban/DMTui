@@ -238,8 +238,9 @@ class BattleApp(App[None]):
         Binding("escape", "release", "Drop"),
         Binding("u", "undo", "Undo"),
         Binding("shift+u", "redo", "Redo"),
-        Binding("s", "save", "Save"),
-        Binding("l", "load", "Load"),
+        Binding("s", "toggle_view", "Switch view"),
+        Binding("ctrl+s", "save", "Save"),
+        Binding("ctrl+l", "load", "Load"),
         Binding("ctrl+p", "command_palette", "Palette"),
         Binding("q", "quit", "Quit"),
         Binding("slash", "chat", "Chat"),
@@ -353,11 +354,11 @@ class BattleApp(App[None]):
         chat_input.display = self._chat_mode
         if not self._chat_mode:
             if self.view_mode == "dm_screen":
-                hints.update("  ·  ".join([hint("f1", "combat"), hint("f2", "DM screen"), hint("ctrl+tab", "toggle"), hint("/", "lookup"), hint("?", "help"), hint("q", "quit")]))
+                hints.update("  ·  ".join([hint("s", "switch"), hint("f1", "combat"), hint("f2", "DM screen"), hint("ctrl+tab", "toggle"), hint("/", "lookup"), hint("?", "help"), hint("q", "quit")]))
             else:
                 hints.update(
                     "  ·  ".join(
-                        [hint("i", "import"), hint("f", "find"), hint("ctrl+p", "palette"), hint("/", "chat"), hint("?", "help"), hint("q", "quit")]
+                    [hint("s", "switch"), hint("i", "import"), hint("f", "find"), hint("ctrl+p", "palette"), hint("/", "chat"), hint("?", "help"), hint("q", "quit")]
                     )
                 )
         elif self._chat_busy:
@@ -1000,7 +1001,7 @@ class BattleApp(App[None]):
         if self.view_mode == "dm_screen":
             return "Fixed 5e quick reference  ·  F1 / Ctrl+1 combat"
         return "  ·  ".join(
-            [hint("s", "save"), hint("l", "load"), hint("u", "undo"), hint("shift+u", "redo")]
+            [hint("ctrl+s", "save"), hint("ctrl+l", "load"), hint("u", "undo"), hint("shift+u", "redo")]
         )
 
     def _detail_status_text(self) -> str:

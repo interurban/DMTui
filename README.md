@@ -77,7 +77,8 @@ cannot parse a character when D&D Beyond denies the service request.
 | `e` | edit the selected creature (name, HP, AC, init mod, role, note, scores) |
 | `f` | find a creature by name or map coordinate (`@B3`, `@AA1`) |
 | `u` / `Shift+u` | undo / redo |
-| `s` / `l` | save / load the encounter to `encounter.json` |
+| `s` | switch between combat and DM Screen |
+| `Ctrl+s` / `Ctrl+l` | save / load the encounter to `encounter.json` |
 | `Ctrl+n` | new blank encounter |
 | `Ctrl+p` | command palette |
 | `/` | ask the OpenAI DM assistant |

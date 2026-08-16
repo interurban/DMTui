@@ -26,6 +26,8 @@ for D&D 5e DMs (Textual). Run: `.venv/bin/python app.py`.
 - **Reference screen polish** — removed duplicate headings and repeated panel
   footers, shortened condition entries, added semantic color accents, and added
   `Ctrl+Tab` as a mode toggle while leaving bare `Tab` for focus navigation.
+- **Shortcut cleanup** — `s` now switches views; `Ctrl+S` saves and `Ctrl+L`
+  loads the encounter.
 
 ## SRD spellbook (complete)
 

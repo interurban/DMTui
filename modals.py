@@ -365,7 +365,7 @@ class HelpModal(ModalScreen[None]):
                 "  [bold]shift+m[/]/[bold]b[/] monster library (SRD)   [bold]v[/] spellbook   [bold]r[/] roll init   [bold]shift+r[/] reset\n"
                 "  [bold]t[/] type initiative inline\n"
                 "  [bold]i[/] import PC   [bold]f[/] find   [bold]e[/] edit   [bold]p[/] add PC   [bold]ctrl+n[/] new encounter\n"
-                "  [bold]u[/] undo   [bold]shift+u[/] redo   [bold]s[/] save   [bold]l[/] load\n"
+                "  [bold]s[/] switch view   [bold]ctrl+s[/] save   [bold]ctrl+l[/] load   [bold]u[/] undo   [bold]shift+u[/] redo\n"
                 "  [bold]/[/] chat or [bold]/roll 2d6+4[/]   [bold]Esc[/] drop token / cancel   [bold]?[/] help\n"
                 "  [bold]q[/] quit   [bold]ctrl+p[/] palette\n\n"
                 "[bold #a8d0ff]Map[/]\n"

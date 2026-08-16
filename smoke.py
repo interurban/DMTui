@@ -145,6 +145,12 @@ async def main() -> None:
         assert "COMBAT QUICK RULES" in str(app.query_one("#log-content", Static).content)
         assert zephyr.hp == hp_before_screen
         app.save_screenshot(os.path.join(SHOTS, "33-dm-screen.png"))
+        await pilot.press("s")
+        await pilot.pause()
+        assert "BATTLE LOG" in str(app.query_one("#log-title", Static).content)
+        await pilot.press("s")
+        await pilot.pause()
+        assert "COMMON ACTIONS" in str(app.query_one("#map-title", Static).content)
         await pilot.press("ctrl+tab")
         await pilot.pause()
         assert "BATTLE LOG" in str(app.query_one("#log-title", Static).content)
@@ -406,13 +412,13 @@ async def main() -> None:
 
         # save the session to disk, damage a PC, then load it back
         hp0 = zephyr.hp
-        await pilot.press("s")
+        await pilot.press("ctrl+s")
         await pilot.pause()
         assert os.path.exists(appmod.SAVE_PATH)
         await pilot.press("d", "5", "enter")
         await pilot.pause()
         assert zephyr.hp == hp0 - 5, zephyr.hp
-        await pilot.press("l")
+        await pilot.press("ctrl+l")
         await pilot.pause()
         zephyr_loaded = [c for c in app.combatants if c.kind == "PC"][0]
         assert zephyr_loaded.hp == hp0, zephyr_loaded.hp
