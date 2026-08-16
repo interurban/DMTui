@@ -35,6 +35,9 @@ For local secret storage, create the ignored `llm_config.local.json` beside
 The local file overrides matching settings in `llm_config.json` and is not
 tracked by Git.
 
+Campaign rulesets are configured in `campaigns.json` with `"ruleset": "2014"`
+or `"ruleset": "2024"`. The active ruleset is included in DM chat context.
+
 ## Keys
 
 | Key | Action |

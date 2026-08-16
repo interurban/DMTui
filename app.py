@@ -50,6 +50,7 @@ SAVE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "encounter.
 CAMPAIGN_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "campaigns.json")
 
 DEFAULT_CAMPAIGN = "My Campaign"
+DEFAULT_RULESET = "2014"
 DEFAULT_CHARACTER_IDS = [112516506, 90060479, 91566422, 90060446]
 
 
@@ -360,7 +361,11 @@ class BattleApp(App[None]):
             text for text, kind, in_log in self._messages
             if in_log and kind not in {"select", "dm"} and not text.startswith(("CHAT >", "DM:"))
         ][-8:]
-        context = f"Round {self.round}; turn: {self._turn.name if self._turn else 'none'}\n" + "\n".join(rows)
+        context = (
+            f"Ruleset: {self._campaign_ruleset()}\n"
+            f"Round {self.round}; turn: {self._turn.name if self._turn else 'none'}\n"
+            + "\n".join(rows)
+        )
         if recent:
             context += "\nRecent log:\n" + "\n".join(recent)
         return context
@@ -388,7 +393,12 @@ class BattleApp(App[None]):
             pass
         data = {
             "active": DEFAULT_CAMPAIGN,
-            "campaigns": {DEFAULT_CAMPAIGN: {"character_ids": list(DEFAULT_CHARACTER_IDS)}},
+            "campaigns": {
+                DEFAULT_CAMPAIGN: {
+                    "character_ids": list(DEFAULT_CHARACTER_IDS),
+                    "ruleset": DEFAULT_RULESET,
+                }
+            },
         }
         try:
             self._campaigns_write(data)
@@ -406,6 +416,14 @@ class BattleApp(App[None]):
             return []
         ids = camp.get("character_ids") or []
         return [int(x) for x in ids if isinstance(x, int) or str(x).isdigit()]
+
+    def _campaign_ruleset(self) -> str:
+        data = self._campaigns_read()
+        active = data.get("active") or DEFAULT_CAMPAIGN
+        campaign = data.get("campaigns", {}).get(active, {})
+        if isinstance(campaign, dict):
+            return str(campaign.get("ruleset") or DEFAULT_RULESET)
+        return DEFAULT_RULESET
 
     def _set_active_campaign(self, name: str) -> None:
         try:
@@ -543,7 +561,7 @@ class BattleApp(App[None]):
         ids = [c.ddb_id for c in self.combatants if c.ddb_id]
         data = self._campaigns_read()
         data.setdefault("campaigns", {})
-        data["campaigns"][name] = {"character_ids": ids}
+        data["campaigns"][name] = {"character_ids": ids, "ruleset": self._campaign_ruleset()}
         data["active"] = name
         self._campaigns_write(data)
         self._log(f"Campaign '{name}' saved — {len(ids)} character{'s' if len(ids) != 1 else ''}.", kind="import")

@@ -78,5 +78,5 @@ def chat(question: str, context: str, *, config: dict | None = None) -> str:
     if not isinstance(answer, str) or not answer.strip():
         raise RuntimeError("OpenAI returned an empty answer")
     answer = re.sub(r"<think>.*?</think>", "", answer, flags=re.DOTALL | re.IGNORECASE)
-    answer = " ".join(answer.split()).strip()
+    answer = "\n".join(" ".join(line.split()).strip() for line in answer.splitlines()).strip()
     return answer
