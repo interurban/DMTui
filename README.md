@@ -42,7 +42,7 @@ or `"ruleset": "2024"`. The active ruleset is included in DM chat context.
 
 Press `Ctrl+2` to replace the
 four encounter panels with a fixed, glanceable 5e reference: combat quick
-rules, conditions, timing/edge cases, and DC/roll guidance. Press `Ctrl+1` to return to the
+rules, conditions, quick numbers, and DC/roll guidance. Press `Ctrl+1` to return to the
 encounter, or `s` to switch between both modes. Bare `Tab` and function keys are
 left to normal terminal/desktop behavior. The reference is intentionally
 read-only; the physical table remains authoritative.

@@ -6,9 +6,8 @@ for D&D 5e DMs (Textual). Run: `.venv/bin/python app.py`.
 ## Table-speed pass (complete)
 
 - **DM Screen mode** — `Ctrl+2` swaps the four encounter panels for a fixed,
-  read-only quick reference covering combat rules, conditions, timing/edge
-  cases, and DCs/rolls; `Ctrl+1` returns to combat and `s` switches between
-  them.
+  read-only quick reference covering combat rules, conditions, quick numbers,
+  and DCs/rolls; `Ctrl+1` returns to combat and `s` switches between them.
 - **Faster table operations** — `Shift+i` walks through unrolled PC
   initiative, `+` duplicates a monster with fresh HP, and `Shift+r` resets an
   encounter undoably.

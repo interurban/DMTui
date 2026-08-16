@@ -142,7 +142,7 @@ async def main() -> None:
         assert "COMBAT QUICK RULES" in str(app.query_one("#map-title", Static).content)
         assert "CONDITIONS" in str(app.query_one("#init-reference", Static).content)
         assert "DCs / ROLLS" in str(app.query_one("#detail", Static).content)
-        assert "REACTION" in str(app.query_one("#log-content", Static).content)
+        assert "HEALING POTIONS" in str(app.query_one("#log-content", Static).content)
         assert zephyr.hp == hp_before_screen
         app.save_screenshot(os.path.join(SHOTS, "33-dm-screen.png"))
         await pilot.press("s")

@@ -934,10 +934,10 @@ class BattleApp(App[None]):
     def _refresh_log(self) -> None:
         content = self.query_one("#log-content", Static)
         self.query_one("#log-title", Static).update(
-            "BATTLE LOG" if self.view_mode == "combat" else "TIMING / EDGE CASES"
+            "BATTLE LOG" if self.view_mode == "combat" else "QUICK NUMBERS"
         )
         if self.view_mode == "dm_screen":
-            content.update(panel_text("timing"))
+            content.update(panel_text("numbers"))
             return
         content.update(self._log_text())
         if self._log_view is not None:
