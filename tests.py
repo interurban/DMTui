@@ -256,7 +256,7 @@ def test_find_free_spot_full_map_returns_none():
 
 def test_build_encounter_returns_fresh_clones():
     """build_encounter must not hand back the shared module singletons —
-    mutating one call's result must not leak into the next (reset regression)."""
+    mutating one call's result must not leak into the next."""
     from battle import build_encounter
 
     first = build_encounter()

@@ -19,6 +19,22 @@ python -m venv .venv
 `?` opens the in-app key guide. `CHANGELOG.md` is the sprint log; `REVIEW.md`
 documents both staff code-review passes and every fix that came out of them.
 
+The `/` command asks the OpenAI model configured in `llm_config.json` for a
+concise answer using the current encounter context. Set `api_key` in
+`llm_config.json` or provide `OPENAI_API_KEY`.
+
+For local secret storage, create the ignored `llm_config.local.json` beside
+`llm_config.json`:
+
+```json
+{
+  "api_key": "sk-your-key-here"
+}
+```
+
+The local file overrides matching settings in `llm_config.json` and is not
+tracked by Git.
+
 ## Keys
 
 | Key | Action |
@@ -33,7 +49,7 @@ documents both staff code-review passes and every fix that came out of them.
 | `m` / `b` | add a monster / browse the searchable monster library |
 | `v` | spellbook — browse the SRD and add a spell to the selected creature |
 | `x` | remove the selected creature (asks first) |
-| `r` | reset to the scripted encounter |
+| `r` | roll monster initiative |
 | `o` / `t` | roll monster initiative / set a creature's initiative |
 | `i` | import a PC from a D&D Beyond URL |
 | `p` | add a PC from a name |
@@ -43,6 +59,7 @@ documents both staff code-review passes and every fix that came out of them.
 | `s` / `l` | save / load the encounter to `encounter.json` |
 | `Ctrl+n` | new blank encounter |
 | `Ctrl+p` | command palette |
+| `/` | ask the OpenAI DM assistant |
 | `q` / `?` | quit / help |
 
 ## Attacks & spells

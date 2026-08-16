@@ -500,7 +500,7 @@ def build_encounter() -> list[Combatant]:
     """Return the starting encounter in encounter order (initiative is blank).
 
     PARTY / ENCOUNTER_MONSTERS are shared module-level singletons, so every
-    call clones them — otherwise 'reset' would hand back the same objects the
+    call clones them — otherwise a fresh encounter would hand back the same objects the
     player has been damaging (regression from the code-review pass)."""
     combatants = [deepcopy(c) for c in (PARTY + ENCOUNTER_MONSTERS)]
     for c in combatants:

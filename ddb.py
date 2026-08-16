@@ -86,7 +86,15 @@ def fetch_character_data(character_id: int) -> dict:
     except urllib.error.HTTPError as exc:
         try:
             detail = json.loads(exc.read().decode("utf-8"))
-            message = detail.get("message") or str(exc)
+            data = detail.get("data") if isinstance(detail, dict) else None
+            message = (
+                detail.get("message")
+                or (data.get("serverMessage") if isinstance(data, dict) else None)
+                or str(exc)
+            )
+            code = data.get("errorCode") if isinstance(data, dict) else None
+            if code:
+                message = f"{message} ({code})"
         except Exception:
             message = str(exc)
         raise ValueError(f"D&D Beyond returned {exc.code}: {message}") from exc

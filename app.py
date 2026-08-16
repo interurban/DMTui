@@ -21,6 +21,7 @@ from textual.binding import Binding
 from textual.containers import Container, Vertical, VerticalScroll
 from textual.css.query import NoMatches
 from textual.widgets import Header, Input, Static
+from rich.markup import escape
 from rich.text import Text
 
 from battle import (
@@ -39,6 +40,7 @@ from battle import (
     short_label,
 )
 import ddb
+import openai_client
 from ddb import ABILITY_NAMES
 from modals import HelpModal, ImportingModal, ListModal, MonsterLibrary, NumberModal, SpellBrowser, TextModal
 import srd as srd_client
@@ -48,7 +50,7 @@ SAVE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "encounter.
 CAMPAIGN_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "campaigns.json")
 
 DEFAULT_CAMPAIGN = "My Campaign"
-DEFAULT_CHARACTER_IDS = [91566422, 112516506, 90060446]
+DEFAULT_CHARACTER_IDS = [112516506, 90060479, 91566422, 90060446]
 
 
 def _parse_coord(s: str) -> tuple[int, int] | None:
@@ -77,6 +79,7 @@ LOG_COLORS = {
     "move": "#7d8794",
     "select": "#8a93a3",
     "remove": "#b39ddb",
+    "dm": "#c678dd",
 }
 
 
@@ -157,6 +160,16 @@ class BattleApp(App[None]):
         border: round #2a3446;
         color: #c9d3e0;
     }
+    #message-hints { width: 100%; }
+    #chat-input {
+        width: 100%;
+        height: 1;
+        margin: 0;
+        padding: 0 1;
+        background: #1d2330;
+        border: none;
+        color: #e6ebf2;
+    }
 
     ModalScreen { align: center middle; background: rgba(8, 10, 14, 0.75); }
     .modal-title { text-style: bold; color: #e6ebf2; margin-bottom: 1; }
@@ -180,7 +193,6 @@ class BattleApp(App[None]):
         Binding("n", "next_turn", "Next turn"),
         Binding("enter", "attack", "Attack"),
         Binding("r", "roll_monster_init", "Monster init"),
-        Binding("shift+r", "reset", "Reset"),
         Binding("t", "set_init", "Set init"),
         Binding("d", "damage", "Damage"),
         Binding("h", "heal", "Heal"),
@@ -198,8 +210,9 @@ class BattleApp(App[None]):
         Binding("backspace", "hp_backspace", "Backspace"),
         Binding("c", "condition", "Condition"),
         Binding("C", "campaign", "Campaign"),
-        Binding("m", "monster", "Monster"),
-        Binding("b", "browse", "Monster lib"),
+        Binding("m", "monster", "Quick monster"),
+        Binding("b", "browse", "Monster library"),
+        Binding("shift+m", "browse", "Monster library"),
         Binding("v", "spell", "Spellbook"),
         Binding("i", "import_pc", "Import PC"),
         Binding("f", "find", "Find"),
@@ -207,8 +220,6 @@ class BattleApp(App[None]):
         Binding("p", "add_pc", "Add PC"),
         Binding("ctrl+n", "new_encounter", "New encounter"),
         Binding("x", "remove", "Remove"),
-        Binding("plus", "heal_one", "+1"),
-        Binding("minus", "damage_one", "-1"),
         Binding("question_mark", "help", "Help"),
         Binding("escape", "release", "Drop"),
         Binding("u", "undo", "Undo"),
@@ -217,6 +228,7 @@ class BattleApp(App[None]):
         Binding("l", "load", "Load"),
         Binding("ctrl+p", "command_palette", "Palette"),
         Binding("q", "quit", "Quit"),
+        Binding("slash", "chat", "Chat"),
     ]
 
     def __init__(self) -> None:
@@ -234,6 +246,11 @@ class BattleApp(App[None]):
         self._redo: list[dict] = []
         self._hp_entry: str | None = None
         self._hp_sign: int = 1
+        self._init_entry: str | None = None
+        self._chat_mode = False
+        self._chat_busy = False
+        self._chat_frame = 0
+        self._chat_timer = None
         self._library_screen: MonsterLibrary | None = None
         self._spell_screen: SpellBrowser | None = None
         self._setup()
@@ -266,16 +283,29 @@ class BattleApp(App[None]):
                 with VerticalScroll(id="detail-scroll"):
                     yield Static("", id="detail")
                 yield Static("", id="detail-status")
-        yield Static(
-            "  ·  ".join([hint("i", "import"), hint("f", "find"), hint("ctrl+p", "palette"), hint("?", "help"), hint("q", "quit")]),
-            id="message",
-        )
+        with Container(id="message"):
+            yield Static("", id="message-hints")
+            yield Input(placeholder="Ask the DM assistant…", id="chat-input")
 
     def on_mount(self) -> None:
         self._refresh_all()
         self.call_after_refresh(self._refresh_all)
         self.call_after_refresh(self._scroll_to_selected)
         self.run_worker(self._boot_campaign())
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id != "chat-input" or not self._chat_mode or self._chat_busy:
+            return
+        question = event.value.strip()
+        if not question:
+            self._exit_chat_mode()
+            return
+        self._chat_busy = True
+        self._chat_frame = 0
+        event.input.value = ""
+        self._refresh_message()
+        self._chat_timer = self.set_interval(0.12, self._tick_chat_animation)
+        self.run_worker(self._answer_chat(question))
 
     def _setup(self) -> None:
         self.combatants = []
@@ -285,16 +315,66 @@ class BattleApp(App[None]):
         self._moving = False
         self._messages = []
 
-    def _reset_encounter(self) -> None:
+    def _refresh_message(self) -> None:
+        hints = self.query_one("#message-hints", Static)
+        chat_input = self.query_one("#chat-input", Input)
+        hints.display = not self._chat_mode
+        chat_input.display = self._chat_mode
+        if not self._chat_mode:
+            hints.update(
+                "  ·  ".join(
+                    [hint("i", "import"), hint("f", "find"), hint("ctrl+p", "palette"), hint("/", "chat"), hint("?", "help"), hint("q", "quit")]
+                )
+            )
+        elif self._chat_busy:
+            frames = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
+            chat_input.placeholder = f"{frames[self._chat_frame]} Thinking…"
+
+    def _tick_chat_animation(self) -> None:
+        if self._chat_busy:
+            self._chat_frame = (self._chat_frame + 1) % 10
+            self._refresh_message()
+
+    def action_chat(self) -> None:
+        if self._chat_busy:
+            return
+        self._chat_mode = True
+        self._refresh_message()
+        self.query_one("#chat-input", Input).focus()
+
+    def _exit_chat_mode(self) -> None:
+        if self._chat_timer is not None:
+            self._chat_timer.stop()
+            self._chat_timer = None
+        self._chat_mode = False
+        self._chat_busy = False
+        self._refresh_message()
+
+    def _chat_context(self) -> str:
+        rows = []
         for c in self.combatants:
-            c.hp = c.max_hp
-            c.conditions.clear()
-            c.init = None
-        self.round = 1
-        self._turn = next((c for c in self.combatants if c.kind == "PC"), self.combatants[0] if self.combatants else None)
-        self._sel = self._turn
-        self._moving = False
-        self._rebuild_rows()
+            conditions = ", ".join(sorted(c.conditions)) or "none"
+            init = "--" if c.init is None else str(c.init)
+            rows.append(f"{c.name}: {c.hp}/{c.max_hp} HP, AC {c.ac}, init {init}, conditions {conditions}")
+        recent = [
+            text for text, kind, in_log in self._messages
+            if in_log and kind not in {"select", "dm"} and not text.startswith(("CHAT >", "DM:"))
+        ][-8:]
+        context = f"Round {self.round}; turn: {self._turn.name if self._turn else 'none'}\n" + "\n".join(rows)
+        if recent:
+            context += "\nRecent log:\n" + "\n".join(recent)
+        return context
+
+    async def _answer_chat(self, question: str) -> None:
+        self._log(f"CHAT > {escape(question)}", kind="select")
+        try:
+            answer = await asyncio.to_thread(openai_client.chat, question, self._chat_context())
+        except Exception as exc:
+            self._log(f"CHAT ERROR: {escape(str(exc))}", kind="warn")
+        else:
+            self._log(f"DM: {escape(answer)}", kind="dm")
+        finally:
+            self._exit_chat_mode()
 
     # -- campaigns -----------------------------------------------------------
 
@@ -375,12 +455,16 @@ class BattleApp(App[None]):
         placed = 0
         try:
             for cid in ids:
+                import_error = None
                 try:
                     pc = await self._fetch_combatant(cid)
-                except Exception:
+                except Exception as exc:
                     pc = None
+                    import_error = str(exc)
                 if pc is None:
                     pc = self._placeholder_pc(cid)
+                    if import_error:
+                        self._log(f"Character {cid} not imported: {import_error}", kind="warn")
                 if not self._place_pc(pc):
                     break
                 self.combatants.append(pc)
@@ -631,6 +715,7 @@ class BattleApp(App[None]):
         self.query_one("#init-status", Static).update(self._init_status_text())
         self.query_one("#log-status", Static).update(self._log_status_text())
         self.query_one("#detail-status", Static).update(self._detail_status_text())
+        self._refresh_message()
         turn = self._turn
         self.sub_title = f"Round {self.round} · {turn.name if turn else '—'} to act"
 
@@ -756,6 +841,12 @@ class BattleApp(App[None]):
         return f"{sel_s}   ·   {hint_text}"
 
     def _init_status_text(self) -> str:
+        if self._init_entry is not None and self._sel is not None:
+            return (
+                f"[bold #e0c04c]INIT[/] [bold #e6ebf2]{self._init_entry or '--'}[/] → "
+                f"[bold #ffffff]{self._sel.name}[/]   ·   "
+                "[bold #e6ebf2]Enter[/] apply · [bold #e6ebf2]Esc[/] cancel"
+            )
         if self._hp_entry is not None and self._sel is not None:
             label = "DAMAGE" if self._hp_sign < 0 else "HEAL"
             color = "#e05a5a" if self._hp_sign < 0 else "#3fae6a"
@@ -769,12 +860,20 @@ class BattleApp(App[None]):
 
     def _log_status_text(self) -> str:
         return "  ·  ".join(
-            [hint("shift+r", "reset"), hint("s", "save"), hint("l", "load"), hint("u", "undo"), hint("q", "quit")]
+            [hint("s", "save"), hint("l", "load"), hint("u", "undo"), hint("shift+u", "redo")]
         )
 
     def _detail_status_text(self) -> str:
         return "  ·  ".join(
-            [hint("a", "attack"), hint("d", "damage"), hint("h", "heal"), hint("m", "monster"), hint("e", "edit")]
+            [
+                hint("a", "attack"),
+                hint("d", "damage"),
+                hint("h", "heal"),
+                hint("c", "condition"),
+                hint("e", "edit"),
+                hint("x", "remove"),
+                hint("m", "quick monster"),
+            ]
         )
 
     def _map_text(self, cell_w: int) -> Text:
@@ -846,6 +945,7 @@ class BattleApp(App[None]):
     def select_at(self, cx: int, cy: int) -> bool:
         for c in self.combatants:
             if (c.x, c.y) == (cx, cy):
+                self._init_entry = None
                 was_moving = self._moving
                 self._moving = False
                 if self._sel is not c:
@@ -895,6 +995,10 @@ class BattleApp(App[None]):
         self._refresh_all()
 
     def action_release(self) -> None:
+        if self._init_entry is not None:
+            self._init_entry = None
+            self._refresh_all()
+            return
         if self._hp_entry is not None:
             self._hp_entry = None
             self._refresh_all()
@@ -907,6 +1011,7 @@ class BattleApp(App[None]):
         n = len(self.combatants)
         if n == 0:
             return
+        self._init_entry = None
         self._sel = self.combatants[(self._sel_index - 1) % n]
         self._refresh_all()
         self._scroll_to_selected()
@@ -915,6 +1020,7 @@ class BattleApp(App[None]):
         n = len(self.combatants)
         if n == 0:
             return
+        self._init_entry = None
         self._sel = self.combatants[(self._sel_index + 1) % n]
         self._refresh_all()
         self._scroll_to_selected()
@@ -966,20 +1072,9 @@ class BattleApp(App[None]):
     def action_set_init(self) -> None:
         if self._sel is None:
             return
-        self.run_worker(self._init_flow())
-
-    async def _init_flow(self) -> None:
-        target = self._sel
-        value = await self.push_screen(
-            NumberModal("Initiative", target.name, "initiative value"),
-            wait_for_dismiss=True,
-        )
-        if value is None:
-            return
-        self._push_undo()
-        target.init = value
-        self._log(f"{target.name} set to initiative {value}.", kind="turn")
-        self._sort_combatants()
+        self._init_entry = ""
+        self._hp_entry = None
+        self._refresh_all()
 
     # -- damage / heal -------------------------------------------------------
 
@@ -998,6 +1093,15 @@ class BattleApp(App[None]):
         self._refresh_all()
 
     def action_hp_digit(self, digit: int) -> None:
+        if self._init_entry is not None and self._sel is not None:
+            if len(self._init_entry) < 3:
+                self._init_entry += str(digit)
+                self._refresh_all()
+            return
+        if self._hp_entry is None and self._sel is not None and self._sel.init is None:
+            self._init_entry = str(digit)
+            self._refresh_all()
+            return
         if self._hp_entry is None or self._sel is None:
             return
         if len(self._hp_entry) < 4:
@@ -1005,6 +1109,10 @@ class BattleApp(App[None]):
             self._refresh_all()
 
     def action_hp_backspace(self) -> None:
+        if self._init_entry is not None:
+            self._init_entry = self._init_entry[:-1]
+            self._refresh_all()
+            return
         if self._hp_entry is None:
             return
         self._hp_entry = self._hp_entry[:-1]
@@ -1013,6 +1121,16 @@ class BattleApp(App[None]):
         self._refresh_all()
 
     def _finish_hp_entry(self) -> None:
+        if self._init_entry is not None and self._sel is not None:
+            entry, self._init_entry = self._init_entry, None
+            if not entry:
+                self._refresh_all()
+                return
+            self._push_undo()
+            self._sel.init = int(entry)
+            self._log(f"{self._sel.name} set to initiative {entry}.", kind="turn")
+            self._refresh_all()
+            return
         if self._hp_entry is None or self._sel is None:
             return
         entry, self._hp_entry = self._hp_entry, None
@@ -1065,7 +1183,7 @@ class BattleApp(App[None]):
     # -- attack resolution -----------------------------------------------------
 
     def action_attack(self) -> None:
-        if self._hp_entry is not None:
+        if self._init_entry is not None or self._hp_entry is not None:
             self._finish_hp_entry()
             return
         if self._sel is not None:
@@ -1575,11 +1693,6 @@ class BattleApp(App[None]):
         self._log("Blank encounter — add PCs ([bold]p[/]) and monsters ([bold]m[/]).", kind="select")
 
     # -- misc ---------------------------------------------------------------
-
-    def action_reset(self) -> None:
-        self._push_undo(restore_nav=True)
-        self._reset_encounter()
-        self._log("Encounter reset to round 1.")
 
     def action_help(self) -> None:
         self.push_screen(HelpModal())

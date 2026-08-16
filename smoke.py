@@ -226,15 +226,6 @@ async def main() -> None:
         app.save_screenshot(os.path.join(SHOTS, "09-removed.png"))
         assert not any(c.name.startswith("Bandit") for c in app.combatants)
 
-        # reset (shift+r): full HP, conditions and initiative cleared, round 1
-        await pilot.press("shift+r")
-        await pilot.pause()
-        assert all(c.hp == c.max_hp for c in app.combatants)
-        assert all(not c.conditions for c in app.combatants)
-        assert all(c.init is None for c in app.combatants)
-        assert app.round == 1
-        app.save_screenshot(os.path.join(SHOTS, "10-reset.png"))
-
         # grab the selected token and place it on the map (down, then right)
         sel = app._sel
         sx, sy = sel.x, sel.y
@@ -393,15 +384,16 @@ async def main() -> None:
         assert "AC 18" in row_text, row_text
         assert "--" in row_text, row_text  # blank init shows as --
 
-        # t sets a creature's initiative and auto-sorts to the top
+        # t sets a creature's initiative in place without hiding the unrolled rows
         app._sel = lyra
         await pilot.press("t")
         await pilot.pause()
-        app.screen.query_one(Input).value = "30"
+        await pilot.press("3")
+        await pilot.press("0")
         await pilot.press("enter")
         await pilot.pause()
         assert lyra.init == 30, lyra.init
-        assert app.combatants[0] is lyra, [c.name for c in app.combatants]
+        assert app.combatants[1] is lyra, [c.name for c in app.combatants]
         app.save_screenshot(os.path.join(SHOTS, "18-set-init.png"))
 
         # import a PC from a D&D Beyond URL (network mocked offline)

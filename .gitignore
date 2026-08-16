@@ -5,3 +5,4 @@ encounter.json
 *.pyc
 campaigns.json
 .cache/
+llm_config.local.json
