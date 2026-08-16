@@ -38,6 +38,13 @@ tracked by Git.
 Campaign rulesets are configured in `campaigns.json` with `"ruleset": "2014"`
 or `"ruleset": "2024"`. The active ruleset is included in DM chat context.
 
+### D&D Beyond imports
+
+Character imports use D&D Beyond's character-service endpoint. If the battle
+log reports access denied or HTTP 403, open that character in D&D Beyond,
+change its privacy to **Public**, save it, and retry the import. The importer
+cannot parse a character when D&D Beyond denies the service request.
+
 ## Keys
 
 | Key | Action |
@@ -53,7 +60,7 @@ or `"ruleset": "2024"`. The active ruleset is included in DM chat context.
 | `v` | spellbook — browse the SRD and add a spell to the selected creature |
 | `x` | remove the selected creature (asks first) |
 | `r` | roll monster initiative |
-| `o` / `t` | roll monster initiative / set a creature's initiative |
+| `r` / `t` | roll monster initiative / set a creature's initiative |
 | `i` | import a PC from a D&D Beyond URL |
 | `p` | add a PC from a name |
 | `e` | edit the selected creature (name, HP, AC, init mod, role, note, scores) |
