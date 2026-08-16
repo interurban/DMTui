@@ -447,7 +447,7 @@ class BattleApp(App[None]):
         return Combatant(
             name=f"Char {cid}", kind="PC", hp=10, max_hp=10, ac=10, init_mod=0,
             role="Unimported",
-            note="D&D Beyond import pending — make the character public to import.",
+            note="D&D Beyond access denied — set this character to Public, then retry the import.",
             x=0, y=0, stats={i: 10 for i in range(1, 7)}, ddb_id=cid,
         )
 

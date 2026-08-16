@@ -86,7 +86,7 @@ def fetch_character_data(character_id: int) -> dict:
     except urllib.error.HTTPError as exc:
         if exc.code == 403:
             raise ValueError(
-                "D&D Beyond denied access; make the character public or share it in the campaign"
+                "Access denied by D&D Beyond; set this character to Public, then retry the import"
             ) from exc
         try:
             detail = json.loads(exc.read().decode("utf-8"))
