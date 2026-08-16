@@ -35,8 +35,8 @@ DM_SCREEN_PANELS = {
         "[bold #e0c04c]POISONED[/]      Attacks and checks [bold]DISADV[/]\n"
         "[bold #e0c04c]PRONE[/]         Melee against: [bold]ADV[/] · ranged: [bold]DISADV[/]\n"
         "[bold #e0c04c]RESTRAINED[/]    Speed [bold]0[/] · attacks/DEX saves [bold]DISADV[/]\n"
-        "[bold #e0c04c]STUNNED[/]       Incapacitated · auto-fail STR/DEX saves\n"
-        "[bold #e0c04c]UNCONSCIOUS[/]   Incapacitated · prone · auto-fail STR/DEX saves"
+        "[bold #e0c04c]STUNNED[/]       Incap. · auto-fail STR/DEX saves\n"
+        "[bold #e0c04c]UNCONSCIOUS[/]   Incap. · prone · auto-fail STR/DEX saves"
     ),
     "combat": (
         "[bold #c678dd]COVER[/]\n"
