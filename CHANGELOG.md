@@ -20,6 +20,9 @@ for D&D 5e DMs (Textual). Run: `.venv/bin/python app.py`.
 - **Reliability** — map headers now continue past `Z`, chat line breaks are
   preserved, and new state fields survive save/load and undo/redo.
 - Tests: 62 unit tests + full headless smoke pass.
+- **Laptop function-key fallback** — `Ctrl+1`/`Ctrl+2` mirror the combat and
+  DM Screen bindings for keyboards where bare F1/F2 are consumed by brightness
+  controls.
 
 ## SRD spellbook (complete)
 

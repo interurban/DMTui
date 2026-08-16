@@ -358,7 +358,7 @@ class HelpModal(ModalScreen[None]):
                 "Everything lives on one screen: map, initiative, detail.[/]\n\n"
                 "[bold #a8d0ff]Keys[/]\n"
                 "  [bold]↑↓[/]/[bold]k j[/] select   [bold]←→[/] ±1 HP\n"
-                "  [bold]F1[/] combat   [bold]F2[/] DM Screen   [bold]g[/] grab / place token\n"
+                "  [bold]F1[/]/[bold]Ctrl+1[/] combat   [bold]F2[/]/[bold]Ctrl+2[/] DM Screen   [bold]g[/] grab / place token\n"
                 "  [bold]n[/] next turn   [bold]shift+i[/] initiative pass   [bold]+[/] duplicate monster\n"
                 "  [bold]Enter[/]/[bold]a[/] attack   [bold]d[/]/[bold]h[/] damage / heal (type amount, [bold]Enter[/] apply, [bold]Esc[/] cancel)\n"
                 "  [bold]c[/] condition   [bold]C[/] campaigns   [bold]m[/] quick monster   [bold]x[/] remove\n"
