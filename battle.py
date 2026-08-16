@@ -65,10 +65,15 @@ class Combatant:
     traits: list[str] = field(default_factory=list)        # special abilities
     spells: list[str] = field(default_factory=list)        # spellcaster spells
     ddb_id: int | None = None                              # source D&D Beyond character id, if imported
+    reminder: str = ""                                    # surfaced when this creature's turn begins
 
     @property
     def alive(self) -> bool:
         return self.hp > 0
+
+    @property
+    def bloodied(self) -> bool:
+        return self.alive and self.hp * 2 <= self.max_hp
 
     @property
     def hp_frac(self) -> float:

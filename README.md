@@ -38,6 +38,13 @@ tracked by Git.
 Campaign rulesets are configured in `campaigns.json` with `"ruleset": "2014"`
 or `"ruleset": "2024"`. The active ruleset is included in DM chat context.
 
+### DM Screen mode
+
+Press `F2` to replace the four encounter panels with a fixed, glanceable 5e
+reference: common actions, conditions, combat rules, and DC/roll guidance.
+Press `F1` to return to the encounter. The reference is intentionally read-only;
+the physical table remains authoritative.
+
 ### D&D Beyond imports
 
 Character imports use D&D Beyond's character-service endpoint. If the battle
@@ -59,8 +66,10 @@ cannot parse a character when D&D Beyond denies the service request.
 | `m` / `b` | add a monster / browse the searchable monster library |
 | `v` | spellbook — browse the SRD and add a spell to the selected creature |
 | `x` | remove the selected creature (asks first) |
-| `r` | roll monster initiative |
 | `r` / `t` | roll monster initiative / set a creature's initiative |
+| `Shift+i` | enter initiative for each unrolled PC in sequence |
+| `+` | duplicate the selected monster at full HP |
+| `Shift+r` | reset the encounter (undoable) |
 | `i` | import a PC from a D&D Beyond URL |
 | `p` | add a PC from a name |
 | `e` | edit the selected creature (name, HP, AC, init mod, role, note, scores) |
@@ -70,6 +79,8 @@ cannot parse a character when D&D Beyond denies the service request.
 | `Ctrl+n` | new blank encounter |
 | `Ctrl+p` | command palette |
 | `/` | ask the OpenAI DM assistant |
+| `/roll 2d6+4` | roll dice locally without using OpenAI |
+| `F1` / `F2` | combat view / fixed DM quick-reference screen |
 | `q` / `?` | quit / help |
 
 ## Attacks & spells
@@ -81,6 +92,11 @@ throw (half damage on a success) and are still rolled for no-damage control
 spells (e.g. Hold Person), heal/cure/regain spells restore HP instead of
 dealing damage (save hints never halve a heal), and `3 darts` lines
 (Magic Missile) roll the dice three times.
+
+`/roll 2d6+4` and `/r 1d20+7` roll locally without contacting OpenAI. Other
+`/` questions use the optional DM assistant with a small encounter context;
+cached SRD spell details are added only when the question clearly names a
+spell.
 
 ## Dev
 
@@ -113,4 +129,5 @@ statblocks the rest of the app uses, so they're indistinguishable in play. Set
 - `widgets.py` — initiative row, token map, scroll containers.
 - `modals.py` — number/list/text prompts, the help screen, and the import
   busy-modal.
+- `dm_screen.py` — the fixed, glanceable 5e quick-reference panels.
 - `REVIEW.md` / `CHANGELOG.md` — staff review findings + fixes, sprint log.

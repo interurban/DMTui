@@ -3,6 +3,24 @@
 Sprint log for the Battle Tracker — a single-screen terminal combat tracker
 for D&D 5e DMs (Textual). Run: `.venv/bin/python app.py`.
 
+## Table-speed pass (complete)
+
+- **DM Screen mode** — `F2` swaps the four encounter panels for a fixed,
+  read-only quick reference covering actions, conditions, combat rules, and
+  DCs/rolls; `F1` returns to combat.
+- **Faster table operations** — `Shift+i` walks through unrolled PC
+  initiative, `+` duplicates a monster with fresh HP, and `Shift+r` resets an
+  encounter undoably.
+- **At-a-glance state** — bloodied creatures are emphasized, and optional
+  turn reminders surface when a creature becomes active.
+- **Local lookup tools** — `/roll 2d6+4` and `/r 1d20+7` use the local dice
+  engine without contacting OpenAI. Chat context is bounded to the selected
+  creature and recent activity, with cached SRD spell details added for clear
+  spell lookups.
+- **Reliability** — map headers now continue past `Z`, chat line breaks are
+  preserved, and new state fields survive save/load and undo/redo.
+- Tests: 62 unit tests + full headless smoke pass.
+
 ## SRD spellbook (complete)
 
 The Open5e integration now covers spells, not just monsters — the generic

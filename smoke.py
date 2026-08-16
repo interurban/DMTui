@@ -134,6 +134,25 @@ async def main() -> None:
         assert "Fire Bolt" in zephyr.spells and "Shield" in zephyr.spells
         app.save_screenshot(os.path.join(SHOTS, "01-start.png"))
 
+        # F2 swaps the four live panels for a read-only DM reference, and F1
+        # returns without changing encounter state.
+        hp_before_screen = zephyr.hp
+        await pilot.press("f2")
+        await pilot.pause()
+        assert "COMMON ACTIONS" in str(app.query_one("#map", Static).content)
+        assert "CONDITIONS" in str(app.query_one("#init-reference", Static).content)
+        assert "DCs / ROLLS" in str(app.query_one("#detail", Static).content)
+        assert "COMBAT QUICK RULES" in str(app.query_one("#log-content", Static).content)
+        assert zephyr.hp == hp_before_screen
+        await pilot.press("f1")
+        await pilot.pause()
+        assert "BATTLE LOG" in str(app.query_one("#log-title", Static).content)
+
+        # local dice commands never invoke the network client
+        assert app._local_chat_command("/roll 1d20+4")
+        assert "ROLL /roll" not in str(app.query_one("#log-content", Static).content)
+        assert "ROLL 1d20+4" in str(app.query_one("#log-content", Static).content)
+
         # inline damage: d arms entry, digits show in the status bar, enter applies
         hp0 = zephyr.hp
         await pilot.press("d")
@@ -170,9 +189,11 @@ async def main() -> None:
         assert "\n\n" in detail, detail
 
         # next turn a few times
+        app._turn.reminder = "WIS save DC 14"
         for _ in range(4):
             await pilot.press("n")
             await pilot.pause()
+        assert any("REMINDER: WIS save DC 14" in message for message, _, _ in app._messages)
         app.save_screenshot(os.path.join(SHOTS, "03-turns.png"))
 
         # toggle a condition on the selected creature (list is sorted by name,
@@ -206,6 +227,21 @@ async def main() -> None:
         log_txt = str(app.query_one("#log-content", Static).content)
         assert "rolls" in log_txt, log_txt
         app.save_screenshot(os.path.join(SHOTS, "17-monster-init.png"))
+
+        # + duplicates a monster with fresh HP, conditions, and initiative.
+        app._sel = bandit
+        count_before_duplicate = len(app.combatants)
+        await pilot.press("+")
+        await pilot.pause()
+        assert len(app.combatants) == count_before_duplicate + 1
+        duplicate = next(c for c in app.combatants if c.name.startswith("Bandit 2"))
+        assert duplicate.hp == duplicate.max_hp and duplicate.init is None and not duplicate.conditions
+        app._sel = duplicate
+        await pilot.press("x")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert duplicate not in app.combatants
 
         # help overlay
         await pilot.press("?")
@@ -395,6 +431,15 @@ async def main() -> None:
         assert lyra.init == 30, lyra.init
         assert app.combatants[1] is lyra, [c.name for c in app.combatants]
         app.save_screenshot(os.path.join(SHOTS, "18-set-init.png"))
+        await pilot.press("shift+i")
+        await pilot.pause()
+        for value in (12, 14):
+            for digit in str(value):
+                await pilot.press(digit)
+            await pilot.press("enter")
+            await pilot.pause()
+        assert zephyr.init == 12 and tess.init == 14
+        assert app._initiative_pass is False
 
         # import a PC from a D&D Beyond URL (network mocked offline)
         assert parse_ddb_url("https://www.dndbeyond.com/characters/9876543") == 9876543
@@ -498,6 +543,7 @@ async def main() -> None:
         # dead-skip scan wraps the whole list (regression: round never advanced)
         await pilot.press("shift+r")
         await pilot.pause()
+        assert all(c.hp == c.max_hp and c.init is None and not c.conditions for c in app.combatants)
         for c in app.combatants:
             c.hp = 0
         r0 = app.round

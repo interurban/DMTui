@@ -230,6 +230,26 @@ def test_short_label():
     assert short_label("") == "?"
 
 
+def test_bloodied_boundary():
+    c = Combatant("Target", "monster", hp=5, max_hp=10, ac=10)
+    assert c.bloodied
+    c.hp = 6
+    assert not c.bloodied
+    c.hp = 0
+    assert not c.bloodied
+
+
+def test_dm_screen_reference_panels_are_fixed_and_glanceable():
+    from dm_screen import DM_SCREEN_PANELS, panel_text
+
+    assert set(DM_SCREEN_PANELS) == {"actions", "conditions", "combat", "rolls"}
+    assert "COMMON ACTIONS" in panel_text("actions")
+    assert "CONDITIONS" in panel_text("conditions")
+    assert "COMBAT QUICK RULES" in panel_text("combat")
+    assert "DCs / ROLLS" in panel_text("rolls")
+    assert panel_text("future") == "[dim]No reference available.[/]"
+
+
 def test_coord_name():
     assert coord_name(0, 0) == "A1"
     assert coord_name(13, 7) == "N8"
@@ -690,6 +710,37 @@ def test_combatant_snap_json_roundtrip():
     restored.saves = set(loaded.get("saves", []))
     assert restored.mod(1) == 4          # STR 19
     assert restored.save(1) == 7         # STR save is proficient (+3 prof)
+
+
+def test_combatant_snapshot_preserves_turn_reminder():
+    from app import BattleApp
+
+    c = Combatant("Test", "PC", hp=12, max_hp=12, ac=15, reminder="WIS save DC 14")
+    app = BattleApp()
+    loaded = app._combatant_snap(c)
+    assert loaded["reminder"] == "WIS save DC 14"
+
+
+def test_openai_response_preserves_compact_line_breaks():
+    import json
+
+    import openai_client
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return json.dumps({"choices": [{"message": {"content": "Line one\nLine two\n\n\nLine three"}}]}).encode()
+
+    with mock.patch.object(urllib.request, "urlopen", return_value=Response()):
+        answer = openai_client.chat(
+            "question", "context", config={"api_key": "test", "url": "https://example.test"}
+        )
+    assert answer == "Line one\nLine two\n\nLine three"
 
 
 def main() -> None:

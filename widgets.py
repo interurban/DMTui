@@ -84,7 +84,7 @@ class CombatantRow(Widget):
 
         hp = f"{c.hp}/{c.max_hp}"
         hcol = "#3fae6a" if frac > 0.5 else ("#d9a441" if frac > 0.25 else ("#d95841" if c.alive else "#66707d"))
-        t.append(hp.ljust(8), self._style(hcol, c.alive and frac <= 0.25))
+        t.append(hp.ljust(8), self._style(hcol, c.alive and c.bloodied))
         t.append(" ", bg)
 
         t.append(f"AC {c.ac}".ljust(ac_w), self._style("#cfd6e0"))
