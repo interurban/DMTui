@@ -26,6 +26,9 @@ for D&D 5e DMs (Textual). Run: `.venv/bin/python app.py`.
   loads the encounter.
 - **Monster library shortcut** — `m` remains Quick Monster; `Ctrl+M` opens the
   searchable Monster Library (`b` remains as a compatibility alias).
+- **Condition reference readability** — the repeated “incapacitated” wording
+  is shortened to `Incap.` for Stunned and Unconscious so both entries scan
+  cleanly in the narrow reference panel.
 
 ## SRD spellbook (complete)
 
