@@ -222,6 +222,7 @@ class BattleApp(App[None]):
         Binding("c", "condition", "Condition"),
         Binding("C", "campaign", "Campaign"),
         Binding("m", "monster", "Quick monster"),
+        Binding("ctrl+m", "browse", "Monster library"),
         Binding("b", "browse", "Monster library"),
         Binding("shift+m", "browse", "Monster library"),
         Binding("v", "spell", "Spellbook"),

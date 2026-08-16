@@ -65,7 +65,7 @@ cannot parse a character when D&D Beyond denies the service request.
 | `a` | attack with the selected creature (weapon/spell, then target) |
 | `d` / `h` | damage / heal (amount prompt) |
 | `c` | toggle a condition |
-| `m` / `b` | add a monster / browse the searchable monster library |
+| `m` / `Ctrl+m` | add a monster / browse the searchable monster library |
 | `v` | spellbook — browse the SRD and add a spell to the selected creature |
 | `x` | remove the selected creature (asks first) |
 | `r` / `t` | roll monster initiative / set a creature's initiative |
@@ -110,7 +110,7 @@ spell.
 
 ## Open5e SRD content
 
-Press `b` to open the monster library and `v` to open the spellbook. Both merge
+Press `Ctrl+m` (or `b`) to open the monster library and `v` to open the spellbook. Both merge
 the hand-authored templates with the official D&D 5e **System Reference
 Document**, fetched from [Open5e](https://open5e.com) on first use and cached to
 `.cache/open5e/`. The first open fetches in the background (needs network, once);

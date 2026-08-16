@@ -362,7 +362,7 @@ class HelpModal(ModalScreen[None]):
                 "  [bold]n[/] next turn   [bold]shift+i[/] initiative pass   [bold]+[/] duplicate monster\n"
                 "  [bold]Enter[/]/[bold]a[/] attack   [bold]d[/]/[bold]h[/] damage / heal (type amount, [bold]Enter[/] apply, [bold]Esc[/] cancel)\n"
                 "  [bold]c[/] condition   [bold]C[/] campaigns   [bold]m[/] quick monster   [bold]x[/] remove\n"
-                "  [bold]shift+m[/]/[bold]b[/] monster library (SRD)   [bold]v[/] spellbook   [bold]r[/] roll init   [bold]shift+r[/] reset\n"
+                "  [bold]ctrl+m[/]/[bold]b[/] monster library (SRD)   [bold]v[/] spellbook   [bold]r[/] roll init   [bold]shift+r[/] reset\n"
                 "  [bold]t[/] type initiative inline\n"
                 "  [bold]i[/] import PC   [bold]f[/] find   [bold]e[/] edit   [bold]p[/] add PC   [bold]ctrl+n[/] new encounter\n"
                 "  [bold]s[/] switch view   [bold]ctrl+s[/] save   [bold]ctrl+l[/] load   [bold]u[/] undo   [bold]shift+u[/] redo\n"

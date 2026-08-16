@@ -579,10 +579,10 @@ async def main() -> None:
         await pilot.pause()
         assert len(app.combatants) == 0, len(app.combatants)
 
-        # monster library browser (b): type a filter, Enter adds the match.
+        # monster library browser (Ctrl+M): type a filter, Enter adds the match.
         # "goblin shaman" is built-in-only (absent from the SRD cache), so it is
         # always a single match regardless of whether SRD data is present.
-        await pilot.press("b")
+        await pilot.press("ctrl+m")
         await pilot.pause()
         await pilot.press(*tuple("goblin shaman"))
         await pilot.pause()
@@ -602,7 +602,7 @@ async def main() -> None:
 
         # spellbook (v): add an SRD spell to the selected creature. Guarded so
         # it still passes in a fresh checkout with no SRD spell cache present.
-        await pilot.press("b")
+        await pilot.press("ctrl+m")
         await pilot.pause()
         await pilot.press(*tuple("goblin shaman"))
         await pilot.pause()

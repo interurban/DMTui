@@ -24,6 +24,8 @@ for D&D 5e DMs (Textual). Run: `.venv/bin/python app.py`.
   footers, shortened condition entries, and added semantic color accents.
 - **Shortcut cleanup** — `s` now switches views; `Ctrl+S` saves and `Ctrl+L`
   loads the encounter.
+- **Monster library shortcut** — `m` remains Quick Monster; `Ctrl+M` opens the
+  searchable Monster Library (`b` remains as a compatibility alias).
 
 ## SRD spellbook (complete)
 
