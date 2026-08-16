@@ -40,11 +40,11 @@ or `"ruleset": "2024"`. The active ruleset is included in DM chat context.
 
 ### DM Screen mode
 
-Press `F2` (or `Ctrl+2` on laptops where F2 controls brightness) to replace the
+Press `Ctrl+2` to replace the
 four encounter panels with a fixed, glanceable 5e reference: common actions,
-conditions, combat rules, and DC/roll guidance. Press `F1` or `Ctrl+1` to return
-to the encounter; `Ctrl+Tab` toggles between both modes. Bare `Tab` is left for
-normal terminal/widget focus navigation. The reference is intentionally
+conditions, combat rules, and DC/roll guidance. Press `Ctrl+1` to return to the
+encounter, or `s` to switch between both modes. Bare `Tab` and function keys are
+left to normal terminal/desktop behavior. The reference is intentionally
 read-only; the physical table remains authoritative.
 
 ### D&D Beyond imports
@@ -83,8 +83,7 @@ cannot parse a character when D&D Beyond denies the service request.
 | `Ctrl+p` | command palette |
 | `/` | ask the OpenAI DM assistant |
 | `/roll 2d6+4` | roll dice locally without using OpenAI |
-| `F1` / `F2` or `Ctrl+1` / `Ctrl+2` | combat view / fixed DM quick-reference screen |
-| `Ctrl+Tab` | toggle between combat and DM Screen |
+| `Ctrl+1` / `Ctrl+2` | combat view / fixed DM quick-reference screen |
 | `q` / `?` | quit / help |
 
 ## Attacks & spells

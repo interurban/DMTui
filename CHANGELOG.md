@@ -5,9 +5,9 @@ for D&D 5e DMs (Textual). Run: `.venv/bin/python app.py`.
 
 ## Table-speed pass (complete)
 
-- **DM Screen mode** — `F2` swaps the four encounter panels for a fixed,
+- **DM Screen mode** — `Ctrl+2` swaps the four encounter panels for a fixed,
   read-only quick reference covering actions, conditions, combat rules, and
-  DCs/rolls; `F1` returns to combat.
+  DCs/rolls; `Ctrl+1` returns to combat and `s` switches between them.
 - **Faster table operations** — `Shift+i` walks through unrolled PC
   initiative, `+` duplicates a monster with fresh HP, and `Shift+r` resets an
   encounter undoably.
@@ -20,12 +20,8 @@ for D&D 5e DMs (Textual). Run: `.venv/bin/python app.py`.
 - **Reliability** — map headers now continue past `Z`, chat line breaks are
   preserved, and new state fields survive save/load and undo/redo.
 - Tests: 62 unit tests + full headless smoke pass.
-- **Laptop function-key fallback** — `Ctrl+1`/`Ctrl+2` mirror the combat and
-  DM Screen bindings for keyboards where bare F1/F2 are consumed by brightness
-  controls.
 - **Reference screen polish** — removed duplicate headings and repeated panel
-  footers, shortened condition entries, added semantic color accents, and added
-  `Ctrl+Tab` as a mode toggle while leaving bare `Tab` for focus navigation.
+  footers, shortened condition entries, and added semantic color accents.
 - **Shortcut cleanup** — `s` now switches views; `Ctrl+S` saves and `Ctrl+L`
   loads the encounter.
 

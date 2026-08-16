@@ -134,10 +134,10 @@ async def main() -> None:
         assert "Fire Bolt" in zephyr.spells and "Shield" in zephyr.spells
         app.save_screenshot(os.path.join(SHOTS, "01-start.png"))
 
-        # F2 swaps the four live panels for a read-only DM reference, and F1
+        # Ctrl+2 swaps the four live panels for a read-only DM reference, and Ctrl+1
         # returns without changing encounter state.
         hp_before_screen = zephyr.hp
-        await pilot.press("f2")
+        await pilot.press("ctrl+2")
         await pilot.pause()
         assert "COMMON ACTIONS" in str(app.query_one("#map", Static).content)
         assert "CONDITIONS" in str(app.query_one("#init-reference", Static).content)
@@ -151,13 +151,13 @@ async def main() -> None:
         await pilot.press("s")
         await pilot.pause()
         assert "COMMON ACTIONS" in str(app.query_one("#map-title", Static).content)
-        await pilot.press("ctrl+tab")
+        await pilot.press("ctrl+1")
         await pilot.pause()
         assert "BATTLE LOG" in str(app.query_one("#log-title", Static).content)
-        await pilot.press("ctrl+tab")
+        await pilot.press("s")
         await pilot.pause()
         assert "COMMON ACTIONS" in str(app.query_one("#map-title", Static).content)
-        await pilot.press("f1")
+        await pilot.press("ctrl+1")
         await pilot.pause()
         assert "BATTLE LOG" in str(app.query_one("#log-title", Static).content)
 

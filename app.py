@@ -191,11 +191,8 @@ class BattleApp(App[None]):
     """
 
     BINDINGS = [
-        Binding("f1", "combat_view", "Combat"),
-        Binding("f2", "dm_screen", "DM Screen"),
         Binding("ctrl+1", "combat_view", "Combat"),
         Binding("ctrl+2", "dm_screen", "DM Screen"),
-        Binding("ctrl+tab", "toggle_view", "Toggle view"),
         Binding("up, k", "arrow_up", "Select"),
         Binding("down, j", "arrow_down", "Select"),
         Binding("left", "arrow_left", "-HP"),
@@ -354,7 +351,7 @@ class BattleApp(App[None]):
         chat_input.display = self._chat_mode
         if not self._chat_mode:
             if self.view_mode == "dm_screen":
-                hints.update("  ·  ".join([hint("s", "switch"), hint("f1", "combat"), hint("f2", "DM screen"), hint("ctrl+tab", "toggle"), hint("/", "lookup"), hint("?", "help"), hint("q", "quit")]))
+                hints.update("  ·  ".join([hint("s", "switch"), hint("ctrl+1", "combat"), hint("ctrl+2", "DM screen"), hint("/", "lookup"), hint("?", "help"), hint("q", "quit")]))
             else:
                 hints.update(
                     "  ·  ".join(
@@ -840,7 +837,7 @@ class BattleApp(App[None]):
         if self.view_mode == "dm_screen":
             grid.update(panel_text("actions"))
             self.query_one("#map-title", Static).update("COMMON ACTIONS")
-            self.query_one("#map-status", Static).update("F1 / Ctrl+1 combat  ·  F2 / Ctrl+2 DM Screen  ·  / lookup  ·  ? help")
+            self.query_one("#map-status", Static).update("s switch  ·  Ctrl+1 combat  ·  Ctrl+2 DM Screen  ·  / lookup  ·  ? help")
             return
         avail_w = max(1, grid.size.width - LEFT_W)
         cell_w = 4 if avail_w >= 20 else 3
@@ -979,7 +976,7 @@ class BattleApp(App[None]):
 
     def _init_status_text(self) -> str:
         if self.view_mode == "dm_screen":
-            return "F1 / Ctrl+1 combat  ·  F2 / Ctrl+2 DM Screen  ·  / lookup  ·  ? help"
+            return "s switch  ·  Ctrl+1 combat  ·  Ctrl+2 DM Screen  ·  / lookup  ·  ? help"
         if self._init_entry is not None and self._sel is not None:
             return (
                 f"[bold #e0c04c]INIT[/] [bold #e6ebf2]{self._init_entry or '--'}[/] → "
@@ -999,14 +996,14 @@ class BattleApp(App[None]):
 
     def _log_status_text(self) -> str:
         if self.view_mode == "dm_screen":
-            return "Fixed 5e quick reference  ·  F1 / Ctrl+1 combat"
+            return "Fixed 5e quick reference  ·  s switch  ·  Ctrl+1 combat"
         return "  ·  ".join(
             [hint("ctrl+s", "save"), hint("ctrl+l", "load"), hint("u", "undo"), hint("shift+u", "redo")]
         )
 
     def _detail_status_text(self) -> str:
         if self.view_mode == "dm_screen":
-            return "Rules lookup: /  ·  F1 / Ctrl+1 combat"
+            return "Rules lookup: /  ·  s switch  ·  Ctrl+1 combat"
         return "  ·  ".join(
             [
                 hint("a", "attack"),
