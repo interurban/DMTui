@@ -141,7 +141,7 @@ Everything below was fixed in this pass and locked in with regression tests
 - Round counter advances when the dead-skip scan wraps past the current turn
   (previously the turn could strand on a skipped creature / sole survivor).
 - Undo/redo revert combatant state without rewinding the turn or round.
-- Fixed a real crash: `s` referenced an undefined `SAVE_PATH` (the smoke test
+- Fixed a real crash: the save action referenced an undefined `SAVE_PATH` (the smoke test
   monkeypatched it, hiding the bug).
 - Map no longer clips its bottom row (header + `MAP_ROWS` rows off-by-one).
 - Full map returns `None` instead of the occupied `(0,0)`; spawn/import/add
@@ -194,7 +194,7 @@ Made mistakes cheap and sessions durable:
   Every mutating action pushes a snapshot: damage/heal, attacks, movement,
   condition toggles, initiative roll/set, add monster, import, remove, reset.
 - `x` removal now asks for confirmation before removing a creature.
-- `s` / `l`: save the whole session to `encounter.json` and load it back —
+- `Ctrl+S` / `Ctrl+L`: save the whole session to `encounter.json` and load it back —
   HP, positions, conditions, round, turn all survive a restart.
 - Fixed a real bug: JSON round-trips turned `stats`' integer keys into strings,
   which broke ability mods/saves after a load.
