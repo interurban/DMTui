@@ -84,6 +84,10 @@ def fetch_character_data(character_id: int) -> dict:
             raise ValueError(f"D&D Beyond returned a non-JSON body: {exc}") from exc
         raise
     except urllib.error.HTTPError as exc:
+        if exc.code == 403:
+            raise ValueError(
+                "D&D Beyond denied access; make the character public or share it in the campaign"
+            ) from exc
         try:
             detail = json.loads(exc.read().decode("utf-8"))
             data = detail.get("data") if isinstance(detail, dict) else None
