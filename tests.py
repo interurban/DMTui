@@ -242,8 +242,8 @@ def test_bloodied_boundary():
 def test_dm_screen_reference_panels_are_fixed_and_glanceable():
     from dm_screen import DM_SCREEN_PANELS, panel_text
 
-    assert set(DM_SCREEN_PANELS) == {"actions", "conditions", "combat", "rolls"}
-    assert "ATTACK" in panel_text("actions")
+    assert set(DM_SCREEN_PANELS) == {"timing", "conditions", "combat", "rolls"}
+    assert "REACTION" in panel_text("timing")
     assert "BLINDED" in panel_text("conditions")
     assert "OPPORTUNITY ATTACK" in panel_text("combat")
     assert "DC 15" in panel_text("rolls")

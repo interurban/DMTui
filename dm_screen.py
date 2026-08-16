@@ -3,18 +3,19 @@
 # Content deliberately omits panel titles: the four panel chrome headers are
 # the titles, so repeating them here wastes the first line of every reference.
 DM_SCREEN_PANELS = {
-    "actions": (
-        "[bold #6fc8d9]ATTACK[/]       [dim]Action[/]\n"
-        "[bold #6fc8d9]DASH[/]         [dim]Action[/]\n"
-        "[bold #6fc8d9]DISENGAGE[/]    [dim]Action[/]\n"
-        "[bold #6fc8d9]DODGE[/]        [dim]Action[/]\n"
-        "[bold #6fc8d9]HELP[/]         [dim]Action[/]\n"
-        "[bold #6fc8d9]HIDE[/]         [dim]Action[/]\n"
-        "[bold #6fc8d9]READY[/]        [dim]Action[/]\n"
-        "[bold #6fc8d9]SEARCH[/]       [dim]Action[/]\n"
-        "[bold #6fc8d9]USE OBJECT[/]   [dim]Action[/]\n\n"
-        "[bold #c678dd]BONUS ACTION[/]  A feature must grant it.\n"
-        "[bold #c678dd]REACTION[/]      A trigger must grant it."
+    "timing": (
+        "[bold #c678dd]REACTION[/]      One per round; refreshes at turn start.\n"
+        "[bold #c678dd]READY[/]         Declare trigger + action; uses reaction.\n"
+        "[bold #c678dd]READIED SPELL[/] Requires concentration; cast when trigger fires.\n"
+        "[bold #c678dd]BONUS ACTION[/]  Only one; a feature must grant it.\n"
+        "[bold #c678dd]OBJECT[/]        One simple interaction is usually free.\n\n"
+        "[bold #c678dd]MOVEMENT[/]\n"
+        "  Split movement around actions; difficult terrain costs 2/1.\n"
+        "  Stand from prone: half your speed.\n\n"
+        "[bold #c678dd]HIDING / SIGHT[/]\n"
+        "  Heavy obscurement blocks sight; unseen attacks have [bold]ADV[/].\n"
+        "  An attack usually reveals the attacker's position.\n\n"
+        "[bold #c678dd]TRIGGERS[/]     Resolve the trigger before the reaction."
     ),
     "conditions": (
         "[bold #e0c04c]BLINDED[/]       Against: [bold]ADV[/] · yours: [bold]DISADV[/]\n"

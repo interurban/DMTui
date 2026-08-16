@@ -835,8 +835,8 @@ class BattleApp(App[None]):
         global MAP_COLS, MAP_ROWS
         grid = self.query_one("#map", MapGrid)
         if self.view_mode == "dm_screen":
-            grid.update(panel_text("actions"))
-            self.query_one("#map-title", Static).update("COMMON ACTIONS")
+            grid.update(panel_text("combat"))
+            self.query_one("#map-title", Static).update("COMBAT QUICK RULES")
             self.query_one("#map-status", Static).update("s switch  ·  Ctrl+1 combat  ·  Ctrl+2 DM Screen  ·  / lookup  ·  ? help")
             return
         avail_w = max(1, grid.size.width - LEFT_W)
@@ -934,10 +934,10 @@ class BattleApp(App[None]):
     def _refresh_log(self) -> None:
         content = self.query_one("#log-content", Static)
         self.query_one("#log-title", Static).update(
-            "BATTLE LOG" if self.view_mode == "combat" else "COMBAT QUICK RULES"
+            "BATTLE LOG" if self.view_mode == "combat" else "TIMING / EDGE CASES"
         )
         if self.view_mode == "dm_screen":
-            content.update(panel_text("combat"))
+            content.update(panel_text("timing"))
             return
         content.update(self._log_text())
         if self._log_view is not None:
