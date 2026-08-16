@@ -243,10 +243,10 @@ def test_dm_screen_reference_panels_are_fixed_and_glanceable():
     from dm_screen import DM_SCREEN_PANELS, panel_text
 
     assert set(DM_SCREEN_PANELS) == {"actions", "conditions", "combat", "rolls"}
-    assert "COMMON ACTIONS" in panel_text("actions")
-    assert "CONDITIONS" in panel_text("conditions")
-    assert "COMBAT QUICK RULES" in panel_text("combat")
-    assert "DCs / ROLLS" in panel_text("rolls")
+    assert "ATTACK" in panel_text("actions")
+    assert "BLINDED" in panel_text("conditions")
+    assert "OPPORTUNITY ATTACK" in panel_text("combat")
+    assert "DC 15" in panel_text("rolls")
     assert panel_text("future") == "[dim]No reference available.[/]"
 
 

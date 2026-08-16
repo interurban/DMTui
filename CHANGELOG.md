@@ -23,6 +23,9 @@ for D&D 5e DMs (Textual). Run: `.venv/bin/python app.py`.
 - **Laptop function-key fallback** — `Ctrl+1`/`Ctrl+2` mirror the combat and
   DM Screen bindings for keyboards where bare F1/F2 are consumed by brightness
   controls.
+- **Reference screen polish** — removed duplicate headings and repeated panel
+  footers, shortened condition entries, added semantic color accents, and added
+  `Ctrl+Tab` as a mode toggle while leaving bare `Tab` for focus navigation.
 
 ## SRD spellbook (complete)
 

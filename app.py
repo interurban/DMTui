@@ -195,6 +195,7 @@ class BattleApp(App[None]):
         Binding("f2", "dm_screen", "DM Screen"),
         Binding("ctrl+1", "combat_view", "Combat"),
         Binding("ctrl+2", "dm_screen", "DM Screen"),
+        Binding("ctrl+tab", "toggle_view", "Toggle view"),
         Binding("up, k", "arrow_up", "Select"),
         Binding("down, j", "arrow_down", "Select"),
         Binding("left", "arrow_left", "-HP"),
@@ -273,7 +274,7 @@ class BattleApp(App[None]):
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         """Keep the reference screen glanceable and mutation-free."""
         if self.view_mode == "dm_screen" and action not in {
-            "combat_view", "dm_screen", "chat", "help", "quit", "release",
+            "combat_view", "dm_screen", "toggle_view", "chat", "help", "quit", "release",
         }:
             return False
         return True
@@ -352,7 +353,7 @@ class BattleApp(App[None]):
         chat_input.display = self._chat_mode
         if not self._chat_mode:
             if self.view_mode == "dm_screen":
-                hints.update("  ·  ".join([hint("f1", "combat"), hint("f2", "DM screen"), hint("/", "lookup"), hint("?", "help"), hint("q", "quit")]))
+                hints.update("  ·  ".join([hint("f1", "combat"), hint("f2", "DM screen"), hint("ctrl+tab", "toggle"), hint("/", "lookup"), hint("?", "help"), hint("q", "quit")]))
             else:
                 hints.update(
                     "  ·  ".join(
@@ -385,6 +386,12 @@ class BattleApp(App[None]):
         self._hp_entry = None
         self.view_mode = "dm_screen"
         self._refresh_all()
+
+    def action_toggle_view(self) -> None:
+        if self.view_mode == "dm_screen":
+            self.action_combat_view()
+        else:
+            self.action_dm_screen()
 
     def _exit_chat_mode(self) -> None:
         if self._chat_timer is not None:
@@ -814,6 +821,8 @@ class BattleApp(App[None]):
         self._refresh_map()
         self._refresh_detail()
         self._refresh_log()
+        for status_id in ("#map-status", "#init-status", "#log-status", "#detail-status"):
+            self.query_one(status_id, Static).display = self.view_mode == "combat"
         self.query_one("#init-status", Static).update(self._init_status_text())
         self.query_one("#log-status", Static).update(self._log_status_text())
         self.query_one("#detail-status", Static).update(self._detail_status_text())

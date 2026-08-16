@@ -144,6 +144,13 @@ async def main() -> None:
         assert "DCs / ROLLS" in str(app.query_one("#detail", Static).content)
         assert "COMBAT QUICK RULES" in str(app.query_one("#log-content", Static).content)
         assert zephyr.hp == hp_before_screen
+        app.save_screenshot(os.path.join(SHOTS, "33-dm-screen.png"))
+        await pilot.press("ctrl+tab")
+        await pilot.pause()
+        assert "BATTLE LOG" in str(app.query_one("#log-title", Static).content)
+        await pilot.press("ctrl+tab")
+        await pilot.pause()
+        assert "COMMON ACTIONS" in str(app.query_one("#map-title", Static).content)
         await pilot.press("f1")
         await pilot.pause()
         assert "BATTLE LOG" in str(app.query_one("#log-title", Static).content)
