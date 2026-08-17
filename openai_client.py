@@ -12,7 +12,28 @@ import urllib.request
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "llm_config.json")
 
 
+def _load_dotenv(path: str) -> None:
+    """Load simple KEY=VALUE settings without overriding the shell."""
+    try:
+        with open(path, encoding="utf-8") as env_file:
+            lines = env_file.readlines()
+    except OSError:
+        return
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
 def load_config(path: str = CONFIG_PATH) -> dict:
+    _load_dotenv(os.path.join(os.path.dirname(path), ".env"))
     with open(path, encoding="utf-8") as config_file:
         config = json.load(config_file)
     if not isinstance(config, dict):

@@ -393,7 +393,7 @@ async def main() -> None:
         t_undone = [c for c in app.combatants if c.name == target.name][0]
         assert t_undone.hp == hp_before, (t_undone.hp, hp_before)
         assert app.round == rnd_before and app._turn.name == turn_before, (app.round, app._turn.name)
-        await pilot.press("shift+u")
+        await pilot.press("U")
         await pilot.pause()
         t_redone = [c for c in app.combatants if c.name == target.name][0]
         assert t_redone.hp == hp_after, (t_redone.hp, hp_after)
@@ -452,7 +452,7 @@ async def main() -> None:
         assert lyra.init == 30, lyra.init
         assert app.combatants[1] is lyra, [c.name for c in app.combatants]
         app.save_screenshot(os.path.join(SHOTS, "18-set-init.png"))
-        await pilot.press("shift+i")
+        await pilot.press("I")
         await pilot.pause()
         for value in (12, 14):
             for digit in str(value):
@@ -559,7 +559,7 @@ async def main() -> None:
         assert all(c.hp == c.max_hp and c.init is None and not c.conditions for c in app.combatants)
 
         # Campaign menu -> scratchpad stores multiline notes in campaigns.json.
-        await pilot.press("shift+c")
+        await pilot.press("C")
         await _wait_modal(pilot, ListModal)
         await pilot.press("down", "down", "enter")
         await pilot.pause()
@@ -570,7 +570,7 @@ async def main() -> None:
         with open(appmod.CAMPAIGN_PATH) as f:
             campaigns = json.load(f)
         assert campaigns["campaigns"][campaigns["active"]]["notes"] == "Guard = Harlan\nDoor code 417"
-        await pilot.press("shift+c")
+        await pilot.press("C")
         await _wait_modal(pilot, ListModal)
         await pilot.press("down", "down", "enter")
         await pilot.pause()
@@ -579,7 +579,7 @@ async def main() -> None:
         await pilot.pause()
 
         # campaigns: save the current party as a new campaign, then load it
-        await pilot.press("shift+c")
+        await pilot.press("C")
         await _wait_modal(pilot, ListModal)
         app.save_screenshot(os.path.join(SHOTS, "31-campaign-menu.png"))
         await pilot.press("down")       # -> "Save current party as a new campaign"
@@ -595,7 +595,7 @@ async def main() -> None:
         assert set(camps["campaigns"]["Test Party"]["character_ids"]) == set(DEFAULT_IDS + [9876543])
 
         # load the saved campaign back (active campaign is the first menu option)
-        await pilot.press("shift+c")
+        await pilot.press("C")
         await _wait_modal(pilot, ListModal)
         await pilot.press("enter")      # -> load: Test Party
         await _wait_pcs(pilot, 4)
@@ -605,7 +605,7 @@ async def main() -> None:
 
         # with everyone dead, advancing must still begin a new round — the
         # dead-skip scan wraps the whole list (regression: round never advanced)
-        await pilot.press("shift+r")
+        await pilot.press("R")
         await pilot.pause()
         assert all(c.hp == c.max_hp and c.init is None and not c.conditions for c in app.combatants)
         for c in app.combatants:
@@ -626,7 +626,7 @@ async def main() -> None:
         await pilot.press("u")
         await pilot.pause()
         assert len(app.combatants) == 4, len(app.combatants)
-        await pilot.press("shift+u")
+        await pilot.press("U")
         await pilot.pause()
         assert len(app.combatants) == 0, len(app.combatants)
 

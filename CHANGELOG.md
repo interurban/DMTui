@@ -39,6 +39,9 @@ for D&D 5e DMs (Textual). Run: `dmtui`.
 - **AI encounter setup** — `Shift+E` turns a short encounter description into
   a previewed lineup using only existing built-in/SRD statblocks; accepting it
   adds fresh monsters with initiative unset.
+- **Shifted-key reliability** — shifted letter shortcuts now use the uppercase
+  key events Textual receives from a terminal, so `Shift+E` and the existing
+  `Shift+C/I/M/R/U` commands dispatch correctly.
 - **Condition reference readability** — the repeated “incapacitated” wording
   is shortened to `Incap.` for Stunned and Unconscious so both entries scan
   cleanly in the narrow reference panel.

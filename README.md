@@ -23,21 +23,35 @@ The legacy `.venv/bin/python app.py` launch still works from a checkout.
 documents both staff code-review passes and every fix that came out of them.
 `ROADMAP.md` tracks the prioritized next features and explicit non-goals.
 
-The `/` command asks the OpenAI model configured in `llm_config.json` for a
-concise answer using the current encounter context. Set `api_key` in
-`llm_config.json` or provide `OPENAI_API_KEY`.
+The `/` command and `Shift+E` AI encounter tool use the OpenAI model configured
+in `llm_config.json`. For local secret storage, copy `.env.example` to `.env`
+and add your key:
 
-For local secret storage, create the ignored `llm_config.local.json` beside
-`llm_config.json`:
+```sh
+cp .env.example .env
+```
+
+Then edit `.env`:
+
+```env
+OPENAI_API_KEY=sk-your-key-here
+```
+
+`.env` is ignored by Git. You can also provide the key through the shell:
+
+```sh
+export OPENAI_API_KEY="sk-your-key-here"
+```
+
+The app loads `.env` automatically when it starts.
+
+For reference, the tracked `llm_config.json` contains only non-secret settings:
 
 ```json
 {
-  "api_key": "sk-your-key-here"
+  "model": "gpt-4o-mini"
 }
 ```
-
-The local file overrides matching settings in `llm_config.json` and is not
-tracked by Git.
 
 Campaign rulesets are configured in `campaigns.json` with `"ruleset": "2014"`
 or `"ruleset": "2024"`. The active ruleset is included in DM chat context.

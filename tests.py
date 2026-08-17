@@ -796,6 +796,19 @@ def test_openai_encounter_plan_uses_catalog_only_structured_output():
     assert "Knight" in requests[0]["messages"][1]["content"]
 
 
+def test_shifted_letter_bindings_use_terminal_key_events():
+    from app import BattleApp
+
+    bindings = {binding.key: binding.action for binding in BattleApp.BINDINGS}
+    assert bindings["E"] == "ai_encounter"
+    assert bindings["C"] == "campaign"
+    assert bindings["I"] == "initiative_pass"
+    assert bindings["M"] == "browse"
+    assert bindings["R"] == "reset"
+    assert bindings["U"] == "redo"
+    assert not any(binding.key.startswith("shift+") for binding in BattleApp.BINDINGS)
+
+
 def main() -> None:
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for fn in fns:

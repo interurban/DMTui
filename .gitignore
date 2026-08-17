@@ -6,5 +6,5 @@ encounters.json
 *.pyc
 campaigns.json
 .cache/
-llm_config.local.json
+.env
 *.egg-info/
