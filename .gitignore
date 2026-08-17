@@ -9,3 +9,4 @@ campaigns.json
 .cache/
 .env
 *.egg-info/
+*.save
