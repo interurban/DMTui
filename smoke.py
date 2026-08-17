@@ -14,7 +14,7 @@ from app import BattleApp
 from battle import Combatant
 from ddb import parse_ddb_url
 from modals import HelpModal, ListModal, TextModal
-from textual.widgets import Input, Static
+from textual.widgets import Input, Static, TextArea
 
 SHOTS = os.path.join(os.path.dirname(__file__), "shots")
 
@@ -108,7 +108,8 @@ async def main() -> None:
     os.makedirs(SHOTS, exist_ok=True)
     appmod.CAMPAIGN_PATH = os.path.join(SHOTS, "campaigns-test.json")
     appmod.SAVE_PATH = os.path.join(SHOTS, "encounter-test.json")
-    for p in (appmod.CAMPAIGN_PATH, appmod.SAVE_PATH):
+    appmod.ENCOUNTER_PATH = os.path.join(SHOTS, "encounters-test.json")
+    for p in (appmod.CAMPAIGN_PATH, appmod.SAVE_PATH, appmod.ENCOUNTER_PATH):
         if os.path.exists(p):
             os.remove(p)
 
@@ -526,6 +527,42 @@ async def main() -> None:
         assert borin.kind == "PC" and borin.ac == 10 and borin.hp == 10 and borin.max_hp == 10
         assert app._sel is borin
         app.save_screenshot(os.path.join(SHOTS, "28-add-pc.png"))
+
+        # Ctrl+E saves and reloads a prepared encounter template with default
+        # HP, clear conditions, and unrolled initiative.
+        await pilot.press("ctrl+e")
+        await _wait_modal(pilot, ListModal)
+        await pilot.press("enter")
+        await _wait_modal(pilot, TextModal)
+        app.screen.query_one(Input).value = "Roadside Ambush"
+        await pilot.press("enter")
+        await pilot.pause()
+        with open(appmod.ENCOUNTER_PATH) as f:
+            templates = json.load(f)
+        template = templates["templates"]["Roadside Ambush"]["snapshot"]
+        assert all(c["hp"] == c["max_hp"] and c["init"] is None and not c["conditions"] for c in template["combatants"])
+        selected_before_template = app._sel
+        await pilot.press("d", "3", "enter")
+        await pilot.pause()
+        assert selected_before_template.hp < selected_before_template.max_hp
+        await pilot.press("ctrl+e")
+        await _wait_modal(pilot, ListModal)
+        await pilot.press("enter")
+        await pilot.pause()
+        assert all(c.hp == c.max_hp and c.init is None and not c.conditions for c in app.combatants)
+
+        # Campaign menu -> scratchpad stores multiline notes in campaigns.json.
+        await pilot.press("C")
+        await _wait_modal(pilot, ListModal)
+        await pilot.press("down", "down", "enter")
+        await pilot.pause()
+        note = app.screen.query_one(TextArea)
+        note.load_text("Guard = Harlan\nDoor code 417")
+        await pilot.press("ctrl+enter")
+        await pilot.pause()
+        with open(appmod.CAMPAIGN_PATH) as f:
+            campaigns = json.load(f)
+        assert campaigns["campaigns"][campaigns["active"]]["notes"] == "Guard = Harlan\nDoor code 417"
 
         # campaigns: save the current party as a new campaign (C), then load it
         await pilot.press("C")

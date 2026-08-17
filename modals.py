@@ -4,9 +4,9 @@ text prompt, and the help screen."""
 from __future__ import annotations
 
 from textual.app import ComposeResult
-from textual.containers import Container
+from textual.containers import Container, Horizontal
 from textual.screen import ModalScreen
-from textual.widgets import Input, Label, ListItem, ListView, Static
+from textual.widgets import Button, Input, Label, ListItem, ListView, Static, TextArea
 
 
 class NumberModal(ModalScreen[int]):
@@ -93,6 +93,45 @@ class TextModal(ModalScreen[str]):
     def _finish(self) -> None:
         value = self.query_one(Input).value.strip()
         self.dismiss(value if value else None)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+class ScratchpadModal(ModalScreen[str | None]):
+    """A deliberately small multiline campaign scratchpad."""
+
+    BINDINGS = [("escape", "cancel", "Cancel")]
+
+    def __init__(self, text: str = "") -> None:
+        super().__init__()
+        self._text = text
+
+    def compose(self) -> ComposeResult:
+        with Container(classes="modal-box scratchpad-box"):
+            yield Static("[bold #e6ebf2]CAMPAIGN SCRATCHPAD[/]", classes="modal-title")
+            yield TextArea(self._text, id="scratchpad-input", placeholder="Notes for the next session…")
+            with Horizontal(classes="modal-buttons"):
+                yield Button("Save", variant="primary", id="save")
+                yield Button("Cancel", id="cancel")
+            yield Static("[dim]Ctrl+Enter or Save · Esc cancel[/]", classes="modal-hint")
+
+    def on_mount(self) -> None:
+        self.query_one("#scratchpad-input", TextArea).focus()
+
+    def on_key(self, event) -> None:
+        if event.key == "ctrl+enter":
+            event.stop()
+            self._save()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "save":
+            self._save()
+        else:
+            self.dismiss(None)
+
+    def _save(self) -> None:
+        self.dismiss(self.query_one("#scratchpad-input", TextArea).text)
 
     def action_cancel(self) -> None:
         self.dismiss(None)
@@ -365,6 +404,7 @@ class HelpModal(ModalScreen[None]):
                 "  [bold]ctrl+m[/]/[bold]b[/] monster library (SRD)   [bold]v[/] spellbook   [bold]r[/] roll init   [bold]shift+r[/] reset\n"
                 "  [bold]t[/] type initiative inline\n"
                 "  [bold]i[/] import PC   [bold]f[/] find   [bold]e[/] edit   [bold]p[/] add PC   [bold]ctrl+n[/] new encounter\n"
+                "  [bold]ctrl+e[/] encounter templates   [bold]C[/] campaign + scratchpad\n"
                 "  [bold]s[/] switch view   [bold]ctrl+s[/] save   [bold]ctrl+l[/] load   [bold]u[/] undo   [bold]shift+u[/] redo\n"
                 "  [bold]/[/] chat or [bold]/roll 2d6+4[/]   [bold]Esc[/] drop token / cancel   [bold]?[/] help\n"
                 "  [bold]q[/] quit   [bold]ctrl+p[/] palette\n\n"

@@ -235,11 +235,13 @@ Made the stat blocks real instead of decorative:
   / @coordinate); D&D Beyond import (unofficial endpoint, best-effort parse);
   reset; help; per-panel command hints.
 
-## Next
+## Roadmap
 
-- No planned sprints — the tool is feature-complete. Ideas if it grows again:
-  monster stat blocks in the detail card, condition-tied map colours,
-  turn timer / encounter notes.
+The active priorities are maintained in [`ROADMAP.md`](ROADMAP.md). Phase 1
+starts with named encounter templates and a persistent campaign scratchpad.
+
+Phase 1 implementation is underway: `Ctrl+E` manages encounter templates, and
+the `C` campaign menu includes the multiline scratchpad.
 ## Round 3 + UX pass (complete)
 
 - **Inline damage/heal entry** — `d`/`h` arms entry; digits in status row; Enter applies, Esc cancels, Backspace edits. Replaces `_run_number`/`_make_number_modal`/`_number_flow`. Regression tests: `test_resolve_spell_regenerate_without_hp`, `test_resolve_damage_spell_mentioning_hp_is_not_heal`, `test_resolve_spell_zero_darts_not_multiplied`, `test_resolve_crit_multi_die_no_bonus`.

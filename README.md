@@ -18,6 +18,7 @@ python -m venv .venv
 
 `?` opens the in-app key guide. `CHANGELOG.md` is the sprint log; `REVIEW.md`
 documents both staff code-review passes and every fix that came out of them.
+`ROADMAP.md` tracks the prioritized next features and explicit non-goals.
 
 The `/` command asks the OpenAI model configured in `llm_config.json` for a
 concise answer using the current encounter context. Set `api_key` in
@@ -80,6 +81,7 @@ cannot parse a character when D&D Beyond denies the service request.
 | `s` | switch between combat and DM Screen |
 | `Ctrl+s` / `Ctrl+l` | save / load the encounter to `encounter.json` |
 | `Ctrl+n` | new blank encounter |
+| `Ctrl+e` | save/load named encounter templates |
 | `Ctrl+p` | command palette |
 | `/` | ask the OpenAI DM assistant |
 | `/roll 2d6+4` | roll dice locally without using OpenAI |
@@ -133,4 +135,5 @@ statblocks the rest of the app uses, so they're indistinguishable in play. Set
 - `modals.py` — number/list/text prompts, the help screen, and the import
   busy-modal.
 - `dm_screen.py` — the fixed, glanceable 5e quick-reference panels.
+- `ROADMAP.md` — prioritized future work and product boundaries.
 - `REVIEW.md` / `CHANGELOG.md` — staff review findings + fixes, sprint log.

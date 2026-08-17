@@ -45,13 +45,14 @@ from battle import (
 import ddb
 import openai_client
 from ddb import ABILITY_NAMES
-from modals import HelpModal, ImportingModal, ListModal, MonsterLibrary, NumberModal, SpellBrowser, TextModal
+from modals import HelpModal, ImportingModal, ListModal, MonsterLibrary, NumberModal, ScratchpadModal, SpellBrowser, TextModal
 import srd as srd_client
 from widgets import CombatantRow, InitiativeList, LEFT_W, LogView, MapGrid
 from dm_screen import panel_text
 
 SAVE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "encounter.json")
 CAMPAIGN_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "campaigns.json")
+ENCOUNTER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "encounters.json")
 
 DEFAULT_CAMPAIGN = "My Campaign"
 DEFAULT_RULESET = "2014"
@@ -187,6 +188,10 @@ class BattleApp(App[None]):
     ListView:focus .modal-item { background: #2f3f5c; color: #ffffff; }
     .modal-hint { margin-top: 1; color: #8a93a3; }
     .modal-help { margin: 0 0 1 0; }
+    .scratchpad-box { width: 72; height: 24; }
+    #scratchpad-input { height: 15; margin-top: 0; }
+    .modal-buttons { height: 3; align: right middle; }
+    .modal-buttons Button { margin-left: 1; }
     Input { margin-top: 1; }
     """
 
@@ -221,6 +226,7 @@ class BattleApp(App[None]):
         Binding("backspace", "hp_backspace", "Backspace"),
         Binding("c", "condition", "Condition"),
         Binding("C", "campaign", "Campaign"),
+        Binding("ctrl+e", "encounter_templates", "Encounter templates"),
         Binding("m", "monster", "Quick monster"),
         Binding("ctrl+m", "browse", "Monster library"),
         Binding("b", "browse", "Monster library"),
@@ -607,6 +613,7 @@ class BattleApp(App[None]):
             mark = "  [green]✓[/]" if name == active else ""
             options.append((f"load:{name}", f"[bold #a8d0ff]LOAD[/] {name}{mark}  [dim]({n} PC{'s' if n != 1 else ''})[/]"))
         options.append(("save", "Save current party as a new campaign"))
+        options.append(("notes", "Edit campaign scratchpad"))
         options.append(("blank", "[bold #d95841]Start a blank encounter[/]"))
         picked = await self.push_screen(ListModal("CAMPAIGNS", options), wait_for_dismiss=True)
         if not picked:
@@ -615,6 +622,8 @@ class BattleApp(App[None]):
             await self._load_campaign_flow(picked[5:])
         elif picked == "save":
             await self._save_campaign_flow()
+        elif picked == "notes":
+            await self._scratchpad_flow()
         elif picked == "blank":
             self.action_new_encounter()
 
@@ -644,6 +653,105 @@ class BattleApp(App[None]):
         data["active"] = name
         self._campaigns_write(data)
         self._log(f"Campaign '{name}' saved — {len(ids)} character{'s' if len(ids) != 1 else ''}.", kind="import")
+
+    async def _scratchpad_flow(self) -> None:
+        data = self._campaigns_read()
+        active = data.get("active") or DEFAULT_CAMPAIGN
+        campaign = data.setdefault("campaigns", {}).setdefault(active, {})
+        current = str(campaign.get("notes") or "") if isinstance(campaign, dict) else ""
+        notes = await self.push_screen(ScratchpadModal(current), wait_for_dismiss=True)
+        if notes is None:
+            return
+        if not isinstance(campaign, dict):
+            campaign = {}
+            data["campaigns"][active] = campaign
+        campaign["notes"] = notes
+        try:
+            self._campaigns_write(data)
+        except OSError as exc:
+            self._log(f"Scratchpad save failed: {exc}", kind="warn")
+            return
+        self._log(f"Campaign scratchpad saved ({len(notes.splitlines())} lines).", kind="import")
+
+    # -- named encounter templates ------------------------------------------
+
+    def _templates_read(self) -> dict:
+        try:
+            with open(ENCOUNTER_PATH, encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict) and isinstance(data.get("templates"), dict):
+                return data
+        except (OSError, ValueError):
+            pass
+        return {"templates": {}}
+
+    def _templates_write(self, data: dict) -> None:
+        with open(ENCOUNTER_PATH, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+
+    def action_encounter_templates(self) -> None:
+        self.run_worker(self._encounter_templates_flow())
+
+    async def _encounter_templates_flow(self) -> None:
+        data = self._templates_read()
+        options = [
+            (f"load:{name}", f"[bold #a8d0ff]LOAD[/] {name}")
+            for name in sorted(data.get("templates", {}))
+        ]
+        options.append(("save", "Save current encounter as template"))
+        picked = await self.push_screen(ListModal("ENCOUNTER TEMPLATES", options), wait_for_dismiss=True)
+        if not picked:
+            return
+        if picked == "save":
+            await self._save_template_flow()
+        elif picked.startswith("load:"):
+            self._load_template(picked[5:], data)
+
+    async def _save_template_flow(self) -> None:
+        if not self.combatants:
+            self._log("Add creatures before saving an encounter template.", kind="warn")
+            return
+        name = await self.push_screen(
+            TextModal("SAVE ENCOUNTER TEMPLATE", "name (e.g. Goblin Ambush)", confirm="Save"),
+            wait_for_dismiss=True,
+        )
+        if not name:
+            return
+        data = self._templates_read()
+        snap = self._snapshot()
+        snap["round"] = 1
+        snap["turn"] = 0
+        snap["sel"] = 0
+        snap["moving"] = False
+        snap["view_mode"] = "combat"
+        for creature in snap["combatants"]:
+            creature["hp"] = creature["max_hp"]
+            creature["init"] = None
+            creature["conditions"] = []
+        data.setdefault("templates", {})[name] = {
+            "ruleset": self._campaign_ruleset(),
+            "snapshot": snap,
+        }
+        try:
+            self._templates_write(data)
+        except OSError as exc:
+            self._log(f"Template save failed: {exc}", kind="warn")
+            return
+        self._log(f"Encounter template '{name}' saved.", kind="import")
+
+    def _load_template(self, name: str, data: dict) -> None:
+        entry = data.get("templates", {}).get(name)
+        snap = entry.get("snapshot") if isinstance(entry, dict) else None
+        if not isinstance(snap, dict) or not isinstance(snap.get("combatants"), list):
+            self._log(f"Template '{name}' is corrupt.", kind="warn")
+            return
+        self._push_undo(restore_nav=True)
+        try:
+            self._restore(snap, keep_nav=False)
+        except (TypeError, ValueError, KeyError) as exc:
+            self._log(f"Template load failed: {exc}", kind="warn")
+            return
+        self._log(f"Loaded encounter template '{name}'.", kind="import")
 
     # -- undo / redo / persistence ------------------------------------------
 
