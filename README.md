@@ -66,6 +66,10 @@ current creatures and positions as a prepared starting state: HP is restored,
 conditions are cleared, and initiative is left unrolled. Loading a template is
 undoable.
 
+Monsters added from the quick picker or searchable library are scattered across
+the top-centre of the map's first four rows, keeping newly imported enemies
+visible and easy to distinguish from the party.
+
 Press `Shift+c` and choose **Edit campaign scratchpad** to keep multiline notes with
 the active campaign—NPC names, clues, loot, passwords, or anything else useful
 between sessions. `Ctrl+Enter` saves the scratchpad; `Esc` cancels.

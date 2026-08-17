@@ -37,6 +37,7 @@ from battle import (
     Combatant,
     coord_name,
     encounter_monster,
+    find_monster_spot,
     find_free_spot,
     resolve_attack,
     roll_dice,
@@ -1841,7 +1842,7 @@ class BattleApp(App[None]):
     def _spawn_monster(self, template: str) -> str | None:
         names = {c.name for c in self.combatants}
         n = self._number_name(template, names)
-        spot = find_free_spot(self.combatants, MAP_COLS, MAP_ROWS)
+        spot = find_monster_spot(self.combatants, MAP_COLS, MAP_ROWS)
         if spot is None:
             self._log("Battle map is full — nothing spawned.", kind="warn")
             return None
@@ -1854,7 +1855,7 @@ class BattleApp(App[None]):
         names = {c.name for c in self.combatants}
         base = fields.get("name", "Monster")
         n = self._number_name(base, names)
-        spot = find_free_spot(self.combatants, MAP_COLS, MAP_ROWS)
+        spot = find_monster_spot(self.combatants, MAP_COLS, MAP_ROWS)
         if spot is None:
             self._log("Battle map is full — nothing spawned.", kind="warn")
             return None

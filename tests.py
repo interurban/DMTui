@@ -2,12 +2,14 @@
 
 import urllib.error
 import urllib.request
+import random
 from unittest import mock
 
 from battle import (
     Combatant,
     coord_name,
     find_free_spot,
+    find_monster_spot,
     resolve_attack,
     roll_dice,
     short_label,
@@ -272,6 +274,26 @@ def test_find_free_spot_full_map_returns_none():
         for ix, (y, x) in enumerate((y, x) for y in range(2) for x in range(3))
     ]
     assert find_free_spot(filled, cols=3, rows=2) is None
+
+
+def test_find_monster_spot_prefers_random_top_middle_band():
+    spot = find_monster_spot([], cols=13, rows=20, rng=random.Random(7))
+    assert spot is not None
+    x, y = spot
+    assert 3 <= x <= 9
+    assert 0 <= y < 4
+
+
+def test_find_monster_spot_falls_back_to_any_top_cell():
+    occupied = [
+        Combatant(f"M{index}", "monster", hp=1, max_hp=1, ac=10, x=x, y=y)
+        for index, (y, x) in enumerate((y, x) for y in range(4) for x in range(3, 10))
+    ]
+    spot = find_monster_spot(occupied, cols=13, rows=20, rng=random.Random(7))
+    assert spot is not None
+    x, y = spot
+    assert not (3 <= x <= 9 and 0 <= y < 4)
+    assert 0 <= y < 4
 
 
 def test_build_encounter_returns_fresh_clones():

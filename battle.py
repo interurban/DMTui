@@ -235,6 +235,44 @@ def find_free_spot(combatants: list[Combatant], cols: int = MAP_COLS, rows: int 
     return None
 
 
+def find_monster_spot(
+    combatants: list[Combatant],
+    cols: int = MAP_COLS,
+    rows: int = MAP_ROWS,
+    rng=random,
+) -> tuple[int, int] | None:
+    """Pick a scattered import position near the top-centre of the map.
+
+    Imported monsters start in the first four rows so the DM can quickly see
+    the encounter's opposing side. The preferred band is the centre seven
+    columns, shuffled to keep groups from forming a rigid line. If that band
+    is occupied, use any remaining cell in the first four rows before falling
+    back to the normal whole-map search.
+    """
+    occupied = {(c.x, c.y) for c in combatants}
+    top_rows = range(min(4, rows))
+    middle_start = max(0, (cols - 7) // 2)
+    middle_end = min(cols, middle_start + 7)
+    preferred = [
+        (x, y)
+        for y in top_rows
+        for x in range(middle_start, middle_end)
+        if (x, y) not in occupied
+    ]
+    if preferred:
+        return rng.choice(preferred)
+
+    top = [
+        (x, y)
+        for y in range(min(4, rows))
+        for x in range(cols)
+        if (x, y) not in occupied
+    ]
+    if top:
+        return rng.choice(top)
+    return find_free_spot(combatants, cols, rows)
+
+
 # ---------------------------------------------------------------------------
 # Monster templates — pick from the "add monster" dialog
 # ---------------------------------------------------------------------------
