@@ -61,14 +61,21 @@ class Combatant:
     hit_dice: str = ""
     skills: dict[str, int] = field(default_factory=dict)  # skill name -> total bonus
     passive_perception: int | None = None
+    spell_dc: int | None = None
     attacks: list[str] = field(default_factory=list)       # e.g. "Longsword +7 · 1d8+4 sl"
     traits: list[str] = field(default_factory=list)        # special abilities
     spells: list[str] = field(default_factory=list)        # spellcaster spells
     ddb_id: int | None = None                              # source D&D Beyond character id, if imported
+    level: int | None = None                               # total character level, when known
+    reminder: str = ""                                    # surfaced when this creature's turn begins
 
     @property
     def alive(self) -> bool:
         return self.hp > 0
+
+    @property
+    def bloodied(self) -> bool:
+        return self.alive and self.hp * 2 <= self.max_hp
 
     @property
     def hp_frac(self) -> float:
@@ -227,6 +234,44 @@ def find_free_spot(combatants: list[Combatant], cols: int = MAP_COLS, rows: int 
             if (x, y) not in occupied:
                 return x, y
     return None
+
+
+def find_monster_spot(
+    combatants: list[Combatant],
+    cols: int = MAP_COLS,
+    rows: int = MAP_ROWS,
+    rng=random,
+) -> tuple[int, int] | None:
+    """Pick a scattered import position near the top-centre of the map.
+
+    Imported monsters start in the first four rows so the DM can quickly see
+    the encounter's opposing side. The preferred band is the centre seven
+    columns, shuffled to keep groups from forming a rigid line. If that band
+    is occupied, use any remaining cell in the first four rows before falling
+    back to the normal whole-map search.
+    """
+    occupied = {(c.x, c.y) for c in combatants}
+    top_rows = range(min(4, rows))
+    middle_start = max(0, (cols - 7) // 2)
+    middle_end = min(cols, middle_start + 7)
+    preferred = [
+        (x, y)
+        for y in top_rows
+        for x in range(middle_start, middle_end)
+        if (x, y) not in occupied
+    ]
+    if preferred:
+        return rng.choice(preferred)
+
+    top = [
+        (x, y)
+        for y in range(min(4, rows))
+        for x in range(cols)
+        if (x, y) not in occupied
+    ]
+    if top:
+        return rng.choice(top)
+    return find_free_spot(combatants, cols, rows)
 
 
 # ---------------------------------------------------------------------------

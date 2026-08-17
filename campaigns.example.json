@@ -1,0 +1,9 @@
+{
+  "active": "My Campaign",
+  "campaigns": {
+    "My Campaign": {
+      "character_ids": [],
+      "ruleset": "2014"
+    }
+  }
+}

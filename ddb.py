@@ -40,6 +40,25 @@ def parse_ddb_url(url: str) -> int | None:
     return None
 
 
+def parse_ddb_urls(text: str) -> list[int]:
+    """Parse one D&D Beyond character URL or bare ID per line.
+
+    Invalid lines are intentionally skipped; the party setup flow reports
+    them alongside characters that could not be fetched.
+    """
+    ids: list[int] = []
+    seen: set[int] = set()
+    for line in text.splitlines():
+        value = line.strip()
+        if not value:
+            continue
+        cid = parse_ddb_url(value)
+        if cid is not None and cid not in seen:
+            seen.add(cid)
+            ids.append(cid)
+    return ids
+
+
 def _iter_modifiers(character: dict):
     mods = character.get("modifiers") or {}
     if isinstance(mods, dict):
@@ -330,6 +349,19 @@ def extract_combatant(character_id: int, data: dict) -> Combatant:
         if isinstance(defn, dict) and defn.get("name"):
             spells.append(defn["name"])
 
+    spell_dc = None
+    for key in ("spellSaveDC", "spellSaveDc", "spellDC", "spellDc"):
+        if character.get(key) is not None:
+            spell_dc = _int(character.get(key), 0) or None
+            if spell_dc is not None:
+                break
+    if spell_dc is None:
+        for mod in _iter_modifiers(character):
+            if str(mod.get("subType") or "").lower() in {"spell save dc", "spell save"}:
+                spell_dc = _int(mod.get("fixedValue"), 0) or None
+                if spell_dc is not None:
+                    break
+
     return Combatant(
         name=name,
         kind="PC",
@@ -347,7 +379,9 @@ def extract_combatant(character_id: int, data: dict) -> Combatant:
         hit_dice=hit_dice,
         skills=skills,
         passive_perception=passive_perception,
+        spell_dc=spell_dc,
         attacks=attacks,
         traits=traits,
         spells=spells,
+        level=total_level,
     )

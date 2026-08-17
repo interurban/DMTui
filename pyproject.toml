@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dmtui"
+version = "0.1.0"
+description = "A table-side terminal combat tracker for D&D 5e DMs"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "textual>=8.2",
+]
+
+[project.scripts]
+dmtui = "dmtui.cli:main"
+
+[tool.setuptools]
+packages = ["dmtui"]
+py-modules = [
+    "app",
+    "battle",
+    "ddb",
+    "dm_screen",
+    "modals",
+    "openai_client",
+    "srd",
+    "widgets",
+]
+
+[tool.setuptools.package-data]
+dmtui = ["py.typed"]

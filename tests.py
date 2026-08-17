@@ -2,17 +2,22 @@
 
 import urllib.error
 import urllib.request
+import random
+import json
+import os
+import tempfile
 from unittest import mock
 
 from battle import (
     Combatant,
     coord_name,
     find_free_spot,
+    find_monster_spot,
     resolve_attack,
     roll_dice,
     short_label,
 )
-from ddb import extract_combatant, fetch_character_data, parse_ddb_url
+from ddb import extract_combatant, fetch_character_data, parse_ddb_url, parse_ddb_urls
 
 
 class Seq:
@@ -230,6 +235,26 @@ def test_short_label():
     assert short_label("") == "?"
 
 
+def test_bloodied_boundary():
+    c = Combatant("Target", "monster", hp=5, max_hp=10, ac=10)
+    assert c.bloodied
+    c.hp = 6
+    assert not c.bloodied
+    c.hp = 0
+    assert not c.bloodied
+
+
+def test_dm_screen_reference_panels_are_fixed_and_glanceable():
+    from dm_screen import DM_SCREEN_PANELS, panel_text
+
+    assert set(DM_SCREEN_PANELS) == {"numbers", "conditions", "combat", "rolls"}
+    assert "HEALING POTIONS" in panel_text("numbers")
+    assert "BLINDED" in panel_text("conditions")
+    assert "OPPORTUNITY ATTACK" in panel_text("combat")
+    assert "DC 15" in panel_text("rolls")
+    assert panel_text("future") == "[dim]No reference available.[/]"
+
+
 def test_coord_name():
     assert coord_name(0, 0) == "A1"
     assert coord_name(13, 7) == "N8"
@@ -252,6 +277,26 @@ def test_find_free_spot_full_map_returns_none():
         for ix, (y, x) in enumerate((y, x) for y in range(2) for x in range(3))
     ]
     assert find_free_spot(filled, cols=3, rows=2) is None
+
+
+def test_find_monster_spot_prefers_random_top_middle_band():
+    spot = find_monster_spot([], cols=13, rows=20, rng=random.Random(7))
+    assert spot is not None
+    x, y = spot
+    assert 3 <= x <= 9
+    assert 0 <= y < 4
+
+
+def test_find_monster_spot_falls_back_to_any_top_cell():
+    occupied = [
+        Combatant(f"M{index}", "monster", hp=1, max_hp=1, ac=10, x=x, y=y)
+        for index, (y, x) in enumerate((y, x) for y in range(4) for x in range(3, 10))
+    ]
+    spot = find_monster_spot(occupied, cols=13, rows=20, rng=random.Random(7))
+    assert spot is not None
+    x, y = spot
+    assert not (3 <= x <= 9 and 0 <= y < 4)
+    assert 0 <= y < 4
 
 
 def test_build_encounter_returns_fresh_clones():
@@ -282,6 +327,17 @@ def test_parse_ddb_url():
     assert parse_ddb_url("https://example.com/other") is None
     assert parse_ddb_url("") is None
     assert parse_ddb_url("https://www.dndbeyond.com/characters/12345?foo=bar") == 12345
+
+
+def test_parse_ddb_urls_accepts_multiline_paste_and_deduplicates():
+    pasted = "\n".join([
+        "https://www.dndbeyond.com/characters/12",
+        "12",
+        "not a character",
+        "https://www.dndbeyond.com/characters/34",
+        "",
+    ])
+    assert parse_ddb_urls(pasted) == [12, 34]
 
 
 REALISTIC = {
@@ -346,6 +402,7 @@ def test_extract_combatant_realistic():
     assert c.name == "Baldrik" and c.kind == "PC"
     assert c.role == "Fighter 3"
     assert c.max_hp == 22 + 4 + 2 * 3 and c.hp == c.max_hp - 6   # +CON per level
+    assert c.level == 3
     assert c.ac == 10 + 2 + 1 + 1                                  # shield + dex + bonus
     assert c.init_mod == 1                                         # DEX 12
     assert c.saves == {1, 3}                                       # STR + CON
@@ -692,6 +749,140 @@ def test_combatant_snap_json_roundtrip():
     assert restored.save(1) == 7         # STR save is proficient (+3 prof)
 
 
+def test_combatant_snapshot_preserves_turn_reminder():
+    from app import BattleApp
+
+    c = Combatant("Test", "PC", hp=12, max_hp=12, ac=15, reminder="WIS save DC 14")
+    app = BattleApp()
+    loaded = app._combatant_snap(c)
+    assert loaded["reminder"] == "WIS save DC 14"
+
+
+def test_party_context_includes_levels_and_strength_signals():
+    from app import BattleApp
+
+    app = BattleApp()
+    app.combatants = [
+        Combatant(
+            "Fighter", "PC", hp=28, max_hp=32, ac=18, level=5, proficiency=3,
+            role="Human Fighter 5", attacks=["Longsword +7 · 1d8+4 sl"],
+        ),
+        Combatant(
+            "Wizard", "PC", hp=16, max_hp=20, ac=14, level=5, proficiency=3,
+            role="Elf Wizard 5", spell_dc=15,
+        ),
+    ]
+    context = app._party_context()
+    assert "levels 5, 5" in context
+    assert "total HP 44/52" in context
+    assert "AC 14-18" in context
+    assert "attack bonuses +7 to +7" in context
+    assert "spell DCs 15" in context
+
+
+def test_openai_response_preserves_compact_line_breaks():
+    import json
+
+    import openai_client
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return json.dumps({"choices": [{"message": {"content": "Line one\nLine two\n\n\nLine three"}}]}).encode()
+
+    with mock.patch.object(urllib.request, "urlopen", return_value=Response()):
+        answer = openai_client.chat(
+            "question", "context", config={"api_key": "test", "url": "https://example.test"}
+        )
+    assert answer == "Line one\nLine two\n\nLine three"
+
+
+def test_openai_encounter_plan_uses_catalog_only_structured_output():
+    import openai_client
+
+    response = _Resp(json.dumps({
+        "choices": [{"message": {"content": json.dumps({
+            "title": "Corrupted Order",
+            "theme": "fallen knights",
+            "difficulty": "Hard",
+            "monsters": [{"name": "Knight", "count": 2}],
+        })}}]
+    }).encode())
+    requests = []
+
+    def fake_urlopen(request, **_kwargs):
+        requests.append(json.loads(request.data.decode()))
+        return response
+
+    with mock.patch.object(urllib.request, "urlopen", side_effect=fake_urlopen):
+        plan = openai_client.plan_encounter(
+            "hard fight against corrupted knights",
+            ["Knight", "Veteran"],
+            "4 PCs; level unknown",
+            config={"api_key": "test", "url": "https://example.test"},
+        )
+    assert plan["monsters"] == [{"name": "Knight", "count": 2}]
+    schema = requests[0]["response_format"]["json_schema"]
+    assert schema["strict"] is True
+    assert "Knight" in requests[0]["messages"][1]["content"]
+
+
+def test_shifted_letter_bindings_use_terminal_key_events():
+    from app import BattleApp
+
+    bindings = {binding.key: binding.action for binding in BattleApp.BINDINGS}
+    assert bindings["E"] == "ai_encounter"
+    assert bindings["C"] == "campaign"
+    assert bindings["I"] == "initiative_pass"
+    assert bindings["M"] == "browse"
+    assert bindings["R"] == "reset"
+    assert bindings["U"] == "redo"
+    assert "ctrl+s" not in bindings and "ctrl+l" not in bindings
+    assert not any(binding.key.startswith("shift+") for binding in BattleApp.BINDINGS)
+
+
+def test_saved_campaigns_put_active_first_and_keep_empty_campaigns():
+    from app import BattleApp
+
+    data = {
+        "active": "Zither Club",
+        "campaigns": {
+            "Empty": {"character_ids": []},
+            "Alpha Team": {"character_ids": [1]},
+            "Zither Club": {"character_ids": [2, "3"]},
+        },
+    }
+    assert BattleApp()._saved_campaigns(data) == [
+        ("Zither Club", 2),
+        ("Alpha Team", 1),
+        ("Empty", 0),
+    ]
+
+
+def test_live_encounter_is_remembered_with_campaign_context():
+    import app as appmod
+    from app import BattleApp
+
+    app = BattleApp()
+    app._session_started = True
+    app._session_campaign = "Lost Mine"
+    app.combatants = [Combatant("Goblin", "monster", hp=7, max_hp=7, ac=15)]
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "current-encounter.json")
+        with mock.patch.object(appmod, "SAVE_PATH", path):
+            assert app._remember_current_encounter()
+            remembered = app._current_encounter_read()
+    assert remembered is not None
+    assert remembered["version"] == 2
+    assert remembered["campaign"] == "Lost Mine"
+    assert remembered["combatants"][0]["name"] == "Goblin"
+
+
 def main() -> None:
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for fn in fns:
@@ -703,9 +894,7 @@ def main() -> None:
 # Open5e SRD integration
 # ---------------------------------------------------------------------------
 
-import os
 import srd as srd_client
-import tempfile
 
 GOBLIN_SRD = {
     "name": "Goblin",

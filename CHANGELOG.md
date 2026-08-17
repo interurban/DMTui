@@ -1,7 +1,67 @@
 # Changelog
 
 Sprint log for the Battle Tracker — a single-screen terminal combat tracker
-for D&D 5e DMs (Textual). Run: `.venv/bin/python app.py`.
+for D&D 5e DMs (Textual). Run: `dmtui`.
+
+## Project cleanup
+
+- Added `pyproject.toml` with project dependency metadata and the `dmtui`
+  console entry point.
+- Added `python -m dmtui` as a package-friendly launcher while keeping the
+  checkout-based `python app.py` path working.
+- Removed stale references to the unimplemented `Ctrl+P` command palette.
+
+## Table-speed pass (complete)
+
+- **DM Screen mode** — `Ctrl+2` swaps the four encounter panels for a fixed,
+  read-only quick reference covering combat rules, conditions, quick numbers,
+  and DCs/rolls; `Ctrl+1` returns to combat and `s` switches between them.
+- **Faster table operations** — `Shift+i` walks through unrolled PC
+  initiative, `+` duplicates a monster with fresh HP, and `Shift+r` resets an
+  encounter undoably.
+- **At-a-glance state** — bloodied creatures are emphasized, and optional
+  turn reminders surface when a creature becomes active.
+- **Local lookup tools** — `/roll 2d6+4` and `/r 1d20+7` use the local dice
+  engine without contacting OpenAI. Chat context is bounded to the selected
+  creature and recent activity, with cached SRD spell details added for clear
+  spell lookups.
+- **Reliability** — map headers now continue past `Z`, chat line breaks are
+  preserved, and new state fields survive save/load and undo/redo.
+- Tests: 62 unit tests + full headless smoke pass.
+- **Reference screen polish** — removed duplicate headings and repeated panel
+  footers, shortened condition entries, and added semantic color accents.
+- **Shortcut cleanup** — `s` now switches views; `Ctrl+S` saves and `Ctrl+L`
+  loads the encounter.
+- **Monster library shortcut** — `m` remains Quick Monster; `Ctrl+M` opens the
+  searchable Monster Library (`b` remains as a compatibility alias).
+- **Monster import placement** — quick-added and SRD-imported monsters now
+  start scattered across the top-centre four rows of the battle map.
+- **AI encounter setup** — `Shift+E` turns a short encounter description into
+  a previewed lineup using only existing built-in/SRD statblocks; accepting it
+  adds fresh monsters with initiative unset.
+- **Party-aware encounter difficulty** — AI encounter generation now includes
+  imported character levels plus aggregate HP, AC, attack, proficiency, spell
+  DC, and role information when judging Easy through Deadly.
+- **Startup party setup** — fresh installs now open a splash menu with a
+  multiline D&D Beyond party importer; valid characters are previewed and
+  remembered locally by named campaign.
+- **Clear campaign model** — campaigns now own their party roster, ruleset, and
+  notes. A party is edited inside a campaign rather than saved or loaded as a
+  competing top-level object.
+- **Automatic encounter memory** — the live battlefield is remembered after
+  changes and can be resumed from startup; `Ctrl+S` / `Ctrl+L` are no longer
+  part of the interaction model.
+- **Prepared encounters** — named reusable setups now store monsters only and
+  combine with the current campaign party. Legacy templates with embedded PCs
+  remain loadable without duplicating the party.
+- **Outcome-first startup** — launch choices are resume, new encounter with the
+  active campaign, prepared encounter, switch campaign, or campaign-free play.
+- **Shifted-key reliability** — shifted letter shortcuts now use the uppercase
+  key events Textual receives from a terminal, so `Shift+E` and the existing
+  `Shift+C/I/M/R/U` commands dispatch correctly.
+- **Condition reference readability** — the repeated “incapacitated” wording
+  is shortened to `Incap.` for Stunned and Unconscious so both entries scan
+  cleanly in the narrow reference panel.
 
 ## SRD spellbook (complete)
 
@@ -119,7 +179,7 @@ Everything below was fixed in this pass and locked in with regression tests
 - Round counter advances when the dead-skip scan wraps past the current turn
   (previously the turn could strand on a skipped creature / sole survivor).
 - Undo/redo revert combatant state without rewinding the turn or round.
-- Fixed a real crash: `s` referenced an undefined `SAVE_PATH` (the smoke test
+- Fixed a real crash: the save action referenced an undefined `SAVE_PATH` (the smoke test
   monkeypatched it, hiding the bug).
 - Map no longer clips its bottom row (header + `MAP_ROWS` rows off-by-one).
 - Full map returns `None` instead of the occupied `(0,0)`; spawn/import/add
@@ -172,7 +232,7 @@ Made mistakes cheap and sessions durable:
   Every mutating action pushes a snapshot: damage/heal, attacks, movement,
   condition toggles, initiative roll/set, add monster, import, remove, reset.
 - `x` removal now asks for confirmation before removing a creature.
-- `s` / `l`: save the whole session to `encounter.json` and load it back —
+- `Ctrl+S` / `Ctrl+L`: save the whole session to `encounter.json` and load it back —
   HP, positions, conditions, round, turn all survive a restart.
 - Fixed a real bug: JSON round-trips turned `stats`' integer keys into strings,
   which broke ability mods/saves after a load.
@@ -208,11 +268,13 @@ Made the stat blocks real instead of decorative:
   / @coordinate); D&D Beyond import (unofficial endpoint, best-effort parse);
   reset; help; per-panel command hints.
 
-## Next
+## Roadmap
 
-- No planned sprints — the tool is feature-complete. Ideas if it grows again:
-  monster stat blocks in the detail card, condition-tied map colours,
-  turn timer / encounter notes.
+The active priorities are maintained in [`ROADMAP.md`](ROADMAP.md). Phase 1
+starts with named encounter templates and a persistent campaign scratchpad.
+
+Phase 1 implementation is underway: `Ctrl+E` manages encounter templates, and
+the `C` campaign menu includes the multiline scratchpad.
 ## Round 3 + UX pass (complete)
 
 - **Inline damage/heal entry** — `d`/`h` arms entry; digits in status row; Enter applies, Esc cancels, Backspace edits. Replaces `_run_number`/`_make_number_modal`/`_number_flow`. Regression tests: `test_resolve_spell_regenerate_without_hp`, `test_resolve_damage_spell_mentioning_hp_is_not_heal`, `test_resolve_spell_zero_darts_not_multiplied`, `test_resolve_crit_multi_die_no_bonus`.

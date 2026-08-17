@@ -1,5 +1,4 @@
 {
-  "api_key": "",
   "model": "gpt-4o-mini",
   "url": "https://api.openai.com/v1/chat/completions",
   "timeout_seconds": 60,

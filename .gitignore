@@ -2,7 +2,10 @@
 __pycache__/
 shots/
 encounter.json
+encounter.json.tmp
+encounters.json
 *.pyc
 campaigns.json
 .cache/
-llm_config.local.json
+.env
+*.egg-info/

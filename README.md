@@ -12,31 +12,78 @@ Built with [Textual](https://textual.textualize.io/).
 
 ```sh
 python -m venv .venv
-.venv/bin/pip install -r requirements.txt
-.venv/bin/python app.py
+.venv/bin/pip install -e .
+dmtui
 ```
+
+The editable install provides both the `dmtui` command and `python -m dmtui`.
+The legacy `.venv/bin/python app.py` launch still works from a checkout.
 
 `?` opens the in-app key guide. `CHANGELOG.md` is the sprint log; `REVIEW.md`
 documents both staff code-review passes and every fix that came out of them.
+`ROADMAP.md` tracks the prioritized next features and explicit non-goals.
 
-The `/` command asks the OpenAI model configured in `llm_config.json` for a
-concise answer using the current encounter context. Set `api_key` in
-`llm_config.json` or provide `OPENAI_API_KEY`.
+The `/` command and `Shift+E` AI encounter tool use the OpenAI model configured
+in `llm_config.json`. For local secret storage, copy `.env.example` to `.env`
+and add your key:
 
-For local secret storage, create the ignored `llm_config.local.json` beside
-`llm_config.json`:
+```sh
+cp .env.example .env
+```
+
+Then edit `.env`:
+
+```env
+OPENAI_API_KEY=sk-your-key-here
+```
+
+`.env` is ignored by Git. You can also provide the key through the shell:
+
+```sh
+export OPENAI_API_KEY="sk-your-key-here"
+```
+
+The app loads `.env` automatically when it starts.
+
+On launch, DMTui asks where to begin: **Resume encounter**, start a new
+encounter with the active campaign, use a prepared encounter, switch campaigns,
+or start without one. The live encounter is remembered automatically in
+`encounter.json`; there is no manual save step. There is one resumable live
+encounter at a time, and starting another replaces that resume point.
+
+A campaign is the long-running game. It remembers its party roster, ruleset,
+and notes in the ignored `campaigns.json`. The party is not a separate saved
+object: choose **Edit party** and paste one D&D Beyond character URL or bare
+character ID per line. Those characters are fetched fresh when a new encounter
+starts. `Shift+C` opens the active campaign during play.
+Editing the party never rewrites the encounter already on the table; it takes
+effect the next time that campaign starts an encounter.
+
+Press `Shift+E` to describe an encounter in plain language. The preview uses
+the loaded party's character levels and aggregate strength—HP, AC, attack
+bonuses, proficiency, spell DCs, and roles—to guide the requested difficulty.
+The accepted lineup still resolves to existing built-in/SRD statblocks.
+
+For reference, the tracked `llm_config.json` contains only non-secret settings:
 
 ```json
 {
-  "api_key": "sk-your-key-here"
+  "model": "gpt-4o-mini"
 }
 ```
 
-The local file overrides matching settings in `llm_config.json` and is not
-tracked by Git.
-
 Campaign rulesets are configured in `campaigns.json` with `"ruleset": "2014"`
 or `"ruleset": "2024"`. The active ruleset is included in DM chat context.
+
+### DM Screen mode
+
+Press `Ctrl+2` to replace the four encounter panels with a fixed, glanceable
+5e reference: combat quick rules, conditions, quick numbers, and DC/roll
+guidance. Press `Ctrl+3` for Party Reference: current HP, AC, passive checks,
+saves, spell DCs, and PC conditions/reminders. Press `Ctrl+1` to return to the
+encounter, or `s` to cycle through all three modes. Bare `Tab` and function keys
+are left to normal terminal/desktop behavior. The references are intentionally
+read-only; the physical table remains authoritative.
 
 ### D&D Beyond imports
 
@@ -45,6 +92,21 @@ log reports access denied or HTTP 403, open that character in D&D Beyond,
 change its privacy to **Public**, save it, and retry the import. The importer
 cannot parse a character when D&D Beyond denies the service request.
 
+### Preparation tools
+
+Use `Ctrl+E` to save or start a prepared encounter. A prepared encounter stores
+only monsters and their starting positions; the active campaign supplies the
+party. Monsters return at full HP with clear conditions and unrolled initiative.
+Older templates that contain PCs are loaded safely—the embedded PCs are ignored.
+
+Monsters added from the quick picker or searchable library are scattered across
+the top-centre of the map's first four rows, keeping newly imported enemies
+visible and easy to distinguish from the party.
+
+Press `Shift+C` and choose the active campaign's notes to keep NPC names, clues,
+loot, passwords, or anything else useful between sessions. `Ctrl+Enter`
+remembers the notes; `Esc` cancels.
+
 ## Keys
 
 | Key | Action |
@@ -52,24 +114,31 @@ cannot parse a character when D&D Beyond denies the service request.
 | `↑`/`↓` or `k`/`j` | select previous/next creature |
 | `←`/`→` | −1/+1 HP |
 | `g` | grab a token (arrows place it, `g`/`Esc` drops) |
-| `n` / `Enter` | next turn |
-| `a` | attack with the selected creature (weapon/spell, then target) |
+| `n` | next turn |
+| `Enter` / `a` | attack with the selected creature |
 | `d` / `h` | damage / heal (amount prompt) |
+| `0`–`9` / `Backspace` | type or edit an inline damage/healing amount |
 | `c` | toggle a condition |
-| `m` / `b` | add a monster / browse the searchable monster library |
+| `m` / `Ctrl+m` / `b` / `Shift+m` | quick add / browse the searchable monster library |
 | `v` | spellbook — browse the SRD and add a spell to the selected creature |
 | `x` | remove the selected creature (asks first) |
-| `r` | roll monster initiative |
 | `r` / `t` | roll monster initiative / set a creature's initiative |
+| `Shift+i` | enter initiative for each unrolled PC in sequence |
+| `+` | duplicate the selected monster at full HP |
+| `Shift+r` | reset the encounter (undoable) |
 | `i` | import a PC from a D&D Beyond URL |
 | `p` | add a PC from a name |
 | `e` | edit the selected creature (name, HP, AC, init mod, role, note, scores) |
+| `Shift+e` | describe an encounter and preview an AI-generated monster lineup |
 | `f` | find a creature by name or map coordinate (`@B3`, `@AA1`) |
 | `u` / `Shift+u` | undo / redo |
-| `s` / `l` | save / load the encounter to `encounter.json` |
-| `Ctrl+n` | new blank encounter |
-| `Ctrl+p` | command palette |
+| `s` | cycle Combat → DM Screen → Party Reference |
+| `Ctrl+1` / `Ctrl+2` / `Ctrl+3` | open Combat / DM Screen / Party Reference |
+| `Shift+c` | open the active campaign, party, and notes |
+| `Ctrl+n` | new encounter with the current campaign |
+| `Ctrl+e` | save/start prepared encounters |
 | `/` | ask the OpenAI DM assistant |
+| `/roll 2d6+4` | roll dice locally without using OpenAI |
 | `q` / `?` | quit / help |
 
 ## Attacks & spells
@@ -82,6 +151,11 @@ spells (e.g. Hold Person), heal/cure/regain spells restore HP instead of
 dealing damage (save hints never halve a heal), and `3 darts` lines
 (Magic Missile) roll the dice three times.
 
+`/roll 2d6+4` and `/r 1d20+7` roll locally without contacting OpenAI. Other
+`/` questions use the optional DM assistant with a small encounter context;
+cached SRD spell details are added only when the question clearly names a
+spell.
+
 ## Dev
 
 ```sh
@@ -89,9 +163,13 @@ dealing damage (save hints never halve a heal), and `3 darts` lines
 .venv/bin/python smoke.py   # headless UI drive-through, screenshots in shots/
 ```
 
+`requirements.txt` remains available for older checkout-based setups; new
+setups should use `pip install -e .` so the launcher and dependency metadata
+stay together.
+
 ## Open5e SRD content
 
-Press `b` to open the monster library and `v` to open the spellbook. Both merge
+Press `Ctrl+m` (or `b`) to open the monster library and `v` to open the spellbook. Both merge
 the hand-authored templates with the official D&D 5e **System Reference
 Document**, fetched from [Open5e](https://open5e.com) on first use and cached to
 `.cache/open5e/`. The first open fetches in the background (needs network, once);
@@ -113,4 +191,6 @@ statblocks the rest of the app uses, so they're indistinguishable in play. Set
 - `widgets.py` — initiative row, token map, scroll containers.
 - `modals.py` — number/list/text prompts, the help screen, and the import
   busy-modal.
+- `dm_screen.py` — the fixed, glanceable 5e quick-reference panels.
+- `ROADMAP.md` — prioritized future work and product boundaries.
 - `REVIEW.md` / `CHANGELOG.md` — staff review findings + fixes, sprint log.
