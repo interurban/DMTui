@@ -60,7 +60,8 @@ feeds the dict smallest-first and asserts stable `"3d8, 2d6"` output.
 - **`action_load` pushed a redundant undo entry when restore failed** — the
   undo snapshot is now taken first and only pushed after a successful restore.
 - **`ctrl+p` palette was advertised but never bound** — the message bar and
-  help listed it; nothing handled it. The binding is now added.
+  help listed it; nothing handled it. The stale shortcut was removed from the
+  binding, message bar, help, and README.
 - **`find` couldn't parse Excel-style coordinates** — `@AA1` failed the
   single-letter parser. `_parse_coord` mirrors `coord_name` for arbitrary
   column lengths.

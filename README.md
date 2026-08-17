@@ -12,9 +12,12 @@ Built with [Textual](https://textual.textualize.io/).
 
 ```sh
 python -m venv .venv
-.venv/bin/pip install -r requirements.txt
-.venv/bin/python app.py
+.venv/bin/pip install -e .
+dmtui
 ```
+
+The editable install provides both the `dmtui` command and `python -m dmtui`.
+The legacy `.venv/bin/python app.py` launch still works from a checkout.
 
 `?` opens the in-app key guide. `CHANGELOG.md` is the sprint log; `REVIEW.md`
 documents both staff code-review passes and every fix that came out of them.
@@ -122,6 +125,10 @@ spell.
 .venv/bin/python tests.py   # unit tests (pure logic + imports)
 .venv/bin/python smoke.py   # headless UI drive-through, screenshots in shots/
 ```
+
+`requirements.txt` remains available for older checkout-based setups; new
+setups should use `pip install -e .` so the launcher and dependency metadata
+stay together.
 
 ## Open5e SRD content
 

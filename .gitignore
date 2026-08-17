@@ -7,3 +7,4 @@ encounters.json
 campaigns.json
 .cache/
 llm_config.local.json
+*.egg-info/

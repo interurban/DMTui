@@ -6,7 +6,7 @@ initiative order, and a detail card for the selected creature. Health bars,
 condition chips, damage/heal/condition/monster actions are all simulated but
 the interaction is real.
 
-Run:  .venv/bin/python app.py
+Run:  dmtui  (or .venv/bin/python app.py from a checkout)
 """
 
 from __future__ import annotations

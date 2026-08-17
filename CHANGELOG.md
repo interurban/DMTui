@@ -1,7 +1,15 @@
 # Changelog
 
 Sprint log for the Battle Tracker — a single-screen terminal combat tracker
-for D&D 5e DMs (Textual). Run: `.venv/bin/python app.py`.
+for D&D 5e DMs (Textual). Run: `dmtui`.
+
+## Project cleanup
+
+- Added `pyproject.toml` with project dependency metadata and the `dmtui`
+  console entry point.
+- Added `python -m dmtui` as a package-friendly launcher while keeping the
+  checkout-based `python app.py` path working.
+- Removed stale references to the unimplemented `Ctrl+P` command palette.
 
 ## Table-speed pass (complete)
 
