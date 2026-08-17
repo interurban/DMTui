@@ -36,6 +36,9 @@ for D&D 5e DMs (Textual). Run: `dmtui`.
   searchable Monster Library (`b` remains as a compatibility alias).
 - **Monster import placement** — quick-added and SRD-imported monsters now
   start scattered across the top-centre four rows of the battle map.
+- **AI encounter setup** — `Shift+E` turns a short encounter description into
+  a previewed lineup using only existing built-in/SRD statblocks; accepting it
+  adds fresh monsters with initiative unset.
 - **Condition reference readability** — the repeated “incapacitated” wording
   is shortened to `Incap.` for Stunned and Unconscious so both entries scan
   cleanly in the narrow reference panel.

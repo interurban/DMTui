@@ -46,7 +46,7 @@ from battle import (
 import ddb
 import openai_client
 from ddb import ABILITY_NAMES
-from modals import HelpModal, ImportingModal, ListModal, MonsterLibrary, NumberModal, ScratchpadModal, SpellBrowser, TextModal
+from modals import EncounterPreviewModal, GeneratingModal, HelpModal, ImportingModal, ListModal, MonsterLibrary, NumberModal, ScratchpadModal, SpellBrowser, TextModal
 import srd as srd_client
 from widgets import CombatantRow, InitiativeList, LEFT_W, LogView, MapGrid
 from dm_screen import panel_text
@@ -229,6 +229,7 @@ class BattleApp(App[None]):
         Binding("c", "condition", "Condition"),
         Binding("shift+c", "campaign", "Campaign menu"),
         Binding("ctrl+e", "encounter_templates", "Encounter templates"),
+        Binding("shift+e", "ai_encounter", "AI encounter"),
         Binding("m", "monster", "Quick monster"),
         Binding("ctrl+m", "browse", "Monster library"),
         Binding("b", "browse", "Monster library"),
@@ -363,7 +364,7 @@ class BattleApp(App[None]):
             else:
                 hints.update(
                     "  ·  ".join(
-                    [hint("s", "switch"), hint("i", "import"), hint("f", "find"), hint("shift+c", "campaigns"), hint("/", "chat"), hint("?", "help"), hint("q", "quit")]
+                    [hint("s", "switch"), hint("i", "import"), hint("f", "find"), hint("shift+e", "AI encounter"), hint("shift+c", "campaigns"), hint("/", "chat"), hint("?", "help"), hint("q", "quit")]
                     )
                 )
         elif self._chat_busy:
@@ -702,6 +703,85 @@ class BattleApp(App[None]):
 
     def action_encounter_templates(self) -> None:
         self.run_worker(self._encounter_templates_flow())
+
+    def action_ai_encounter(self) -> None:
+        self.run_worker(self._ai_encounter_flow())
+
+    def _monster_catalog(self) -> dict[str, tuple[str, object]]:
+        catalog: dict[str, tuple[str, object]] = {
+            name.casefold(): ("builtin", name) for name in MONSTERS
+        }
+        for fields in srd_client.load_cache("monsters") or []:
+            name = str(fields.get("name") or "").strip()
+            if name:
+                catalog.setdefault(name.casefold(), ("srd", fields))
+        return catalog
+
+    def _party_context(self) -> str:
+        pcs = [c for c in self.combatants if c.kind == "PC"]
+        return f"{len(pcs)} PC{'s' if len(pcs) != 1 else ''}; level unknown"
+
+    async def _ai_encounter_flow(self) -> None:
+        description = await self.push_screen(
+            TextModal("AI ENCOUNTER", "hard undead crypt encounter", confirm="Build"),
+            wait_for_dismiss=True,
+        )
+        if not description:
+            return
+        while True:
+            catalog = self._monster_catalog()
+            loading = GeneratingModal()
+            self.push_screen(loading)
+            try:
+                plan = await asyncio.to_thread(
+                    openai_client.plan_encounter,
+                    description,
+                    [entry[1] if entry[0] == "builtin" else entry[1].get("name", "") for entry in catalog.values()],
+                    self._party_context(),
+                )
+            except Exception as exc:
+                self._log(f"AI encounter failed: {escape(str(exc))}", kind="warn")
+                return
+            finally:
+                loading.dismiss()
+
+            resolved: list[tuple[str, int, tuple[str, object]]] = []
+            invalid: list[str] = []
+            for item in plan.get("monsters", []):
+                if not isinstance(item, dict):
+                    continue
+                name = str(item.get("name") or "").strip()
+                key = name.casefold()
+                entry = catalog.get(key)
+                count = item.get("count", 1)
+                if entry is None or not isinstance(count, int) or not 1 <= count <= 12:
+                    invalid.append(name or "(unnamed)")
+                    continue
+                resolved.append((name, count, entry))
+            if invalid or not resolved:
+                self._log(f"AI encounter used unavailable monsters: {', '.join(invalid)}", kind="warn")
+                return
+
+            lines = [f"  [bold #ff9d9d]{count:>2}×[/] {name}" for name, count, _ in resolved]
+            action = await self.push_screen(EncounterPreviewModal(plan, lines), wait_for_dismiss=True)
+            if action == "regenerate":
+                continue
+            if action != "add":
+                return
+            self._add_ai_encounter(resolved)
+            return
+
+    def _add_ai_encounter(self, resolved: list[tuple[str, int, tuple[str, object]]]) -> None:
+        total = sum(count for _, count, _ in resolved)
+        self._push_undo()
+        added = 0
+        for name, count, (source, data) in resolved:
+            for _ in range(count):
+                result = self._spawn_monster(name, record_undo=False) if source == "builtin" else self._spawn_srd(dict(data), record_undo=False)
+                if result:
+                    added += 1
+        if added:
+            self._log(f"AI encounter added — {added} of {total} monsters ready; initiative unset.", kind="import")
 
     async def _encounter_templates_flow(self) -> None:
         data = self._templates_read()
@@ -1832,14 +1912,15 @@ class BattleApp(App[None]):
             count += 1
         return f"{base} {count}"
 
-    def _add_combatant(self, c: Combatant, msg: str) -> None:
-        self._push_undo()
+    def _add_combatant(self, c: Combatant, msg: str, *, record_undo: bool = True) -> None:
+        if record_undo:
+            self._push_undo()
         self.combatants.append(c)
         self._sort_combatants()
         self._log(msg, kind="monster")
         self._refresh_all()
 
-    def _spawn_monster(self, template: str) -> str | None:
+    def _spawn_monster(self, template: str, *, record_undo: bool = True) -> str | None:
         names = {c.name for c in self.combatants}
         n = self._number_name(template, names)
         spot = find_monster_spot(self.combatants, MAP_COLS, MAP_ROWS)
@@ -1848,10 +1929,14 @@ class BattleApp(App[None]):
             return None
         x, y = spot
         mob = encounter_monster(template, n, x=x, y=y)
-        self._add_combatant(mob, f"{n} joins the fight at {coord_name(x, y)} — press [bold]r[/] to roll its initiative.")
+        self._add_combatant(
+            mob,
+            f"{n} joins the fight at {coord_name(x, y)} — press [bold]r[/] to roll its initiative.",
+            record_undo=record_undo,
+        )
         return n
 
-    def _spawn_srd(self, fields: dict) -> str | None:
+    def _spawn_srd(self, fields: dict, *, record_undo: bool = True) -> str | None:
         names = {c.name for c in self.combatants}
         base = fields.get("name", "Monster")
         n = self._number_name(base, names)
@@ -1868,6 +1953,7 @@ class BattleApp(App[None]):
         self._add_combatant(
             c,
             f"{n} (SRD) joins at {coord_name(spot[0], spot[1])} — press [bold]r[/] to roll initiative.",
+            record_undo=record_undo,
         )
         return n
 

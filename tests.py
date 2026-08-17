@@ -3,6 +3,7 @@
 import urllib.error
 import urllib.request
 import random
+import json
 from unittest import mock
 
 from battle import (
@@ -763,6 +764,36 @@ def test_openai_response_preserves_compact_line_breaks():
             "question", "context", config={"api_key": "test", "url": "https://example.test"}
         )
     assert answer == "Line one\nLine two\n\nLine three"
+
+
+def test_openai_encounter_plan_uses_catalog_only_structured_output():
+    import openai_client
+
+    response = _Resp(json.dumps({
+        "choices": [{"message": {"content": json.dumps({
+            "title": "Corrupted Order",
+            "theme": "fallen knights",
+            "difficulty": "Hard",
+            "monsters": [{"name": "Knight", "count": 2}],
+        })}}]
+    }).encode())
+    requests = []
+
+    def fake_urlopen(request, **_kwargs):
+        requests.append(json.loads(request.data.decode()))
+        return response
+
+    with mock.patch.object(urllib.request, "urlopen", side_effect=fake_urlopen):
+        plan = openai_client.plan_encounter(
+            "hard fight against corrupted knights",
+            ["Knight", "Veteran"],
+            "4 PCs; level unknown",
+            config={"api_key": "test", "url": "https://example.test"},
+        )
+    assert plan["monsters"] == [{"name": "Knight", "count": 2}]
+    schema = requests[0]["response_format"]["json_schema"]
+    assert schema["strict"] is True
+    assert "Knight" in requests[0]["messages"][1]["content"]
 
 
 def main() -> None:

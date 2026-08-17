@@ -96,6 +96,7 @@ between sessions. `Ctrl+Enter` saves the scratchpad; `Esc` cancels.
 | `i` | import a PC from a D&D Beyond URL |
 | `p` | add a PC from a name |
 | `e` | edit the selected creature (name, HP, AC, init mod, role, note, scores) |
+| `Shift+e` | describe an encounter and preview an AI-generated monster lineup |
 | `f` | find a creature by name or map coordinate (`@B3`, `@AA1`) |
 | `u` / `Shift+u` | undo / redo |
 | `s` | cycle Combat → DM Screen → Party Reference |

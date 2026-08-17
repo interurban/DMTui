@@ -98,6 +98,57 @@ class TextModal(ModalScreen[str]):
         self.dismiss(None)
 
 
+class EncounterPreviewModal(ModalScreen[str]):
+    """Preview an AI encounter before it changes the live encounter."""
+
+    BINDINGS = [
+        ("enter", "accept", "Add encounter"),
+        ("r", "regenerate", "Regenerate"),
+        ("escape", "cancel", "Cancel"),
+    ]
+
+    def __init__(self, plan: dict, lines: list[str]) -> None:
+        super().__init__()
+        self._plan = plan
+        self._lines = lines
+
+    def compose(self) -> ComposeResult:
+        title = str(self._plan.get("title") or "AI ENCOUNTER").upper()
+        theme = str(self._plan.get("theme") or "")
+        difficulty = str(self._plan.get("difficulty") or "Unknown")
+        detail = f"[dim]{theme}[/]\n[bold #a8d0ff]Difficulty:[/] {difficulty}\n\n" + "\n".join(self._lines)
+        with Container(classes="modal-box"):
+            yield Static(f"[bold #e6ebf2]{title}[/]", classes="modal-title")
+            yield Static(detail)
+            yield Static(
+                "[dim][bold]Enter[/] add · [bold]r[/] regenerate · [bold]Esc[/] cancel[/]",
+                classes="modal-hint",
+            )
+
+    def action_accept(self) -> None:
+        self.dismiss("add")
+
+    def action_regenerate(self) -> None:
+        self.dismiss("regenerate")
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+class GeneratingModal(ModalScreen[None]):
+    """Blocks input while an AI encounter plan is being generated."""
+
+    BINDINGS = [("escape", "cancel", "Cancel")]
+
+    def compose(self) -> ComposeResult:
+        with Container(classes="modal-box"):
+            yield Static("[bold #a8d0ff]Building encounter…[/]", classes="modal-title")
+            yield Static("[dim]Choosing existing monster statblocks — one moment.[/]")
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
 class ScratchpadModal(ModalScreen[str | None]):
     """A deliberately small multiline campaign scratchpad."""
 
@@ -404,7 +455,7 @@ class HelpModal(ModalScreen[None]):
                 "  [bold]c[/] condition   [bold]shift+c[/] campaigns   [bold]m[/] quick monster   [bold]x[/] remove\n"
                 "  [bold]ctrl+m[/]/[bold]b[/]/[bold]shift+m[/] monster library (SRD)   [bold]v[/] spellbook   [bold]r[/] roll init   [bold]shift+r[/] reset\n"
                 "  [bold]t[/] type initiative inline\n"
-                "  [bold]i[/] import PC   [bold]f[/] find   [bold]e[/] edit   [bold]p[/] add PC   [bold]ctrl+n[/] new encounter\n"
+                "  [bold]i[/] import PC   [bold]f[/] find   [bold]e[/] edit   [bold]shift+e[/] AI encounter   [bold]p[/] add PC   [bold]ctrl+n[/] new encounter\n"
                 "  [bold]ctrl+e[/] encounter templates   [bold]shift+c[/] campaign + scratchpad\n"
                 "  [bold]s[/] cycle views   [bold]ctrl+1/2/3[/] choose view   [bold]ctrl+s[/]/[bold]ctrl+l[/] save/load\n"
                 "  [bold]u[/]/[bold]shift+u[/] undo/redo   [bold]/[/] chat or [bold]/roll 2d6+4[/]   [bold]?[/] help\n"
