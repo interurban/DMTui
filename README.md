@@ -55,6 +55,17 @@ log reports access denied or HTTP 403, open that character in D&D Beyond,
 change its privacy to **Public**, save it, and retry the import. The importer
 cannot parse a character when D&D Beyond denies the service request.
 
+### Preparation tools
+
+Use `Ctrl+E` to save or load named encounter templates. Saving captures the
+current creatures and positions as a prepared starting state: HP is restored,
+conditions are cleared, and initiative is left unrolled. Loading a template is
+undoable.
+
+Press `C` and choose **Edit campaign scratchpad** to keep multiline notes with
+the active campaign—NPC names, clues, loot, passwords, or anything else useful
+between sessions. `Ctrl+Enter` saves the scratchpad; `Esc` cancels.
+
 ## Keys
 
 | Key | Action |
