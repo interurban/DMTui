@@ -7,6 +7,7 @@ from textual.app import ComposeResult
 from textual.containers import Container, Horizontal
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, ListItem, ListView, Static, TextArea
+from rich.markup import escape
 
 
 class NumberModal(ModalScreen[int]):
@@ -57,7 +58,7 @@ class ListModal(ModalScreen[str]):
                 *[ListItem(Label(label, classes="modal-item")) for _, label in self._options],
                 id="modal-list",
             )
-            yield Static("[dim][bold]Enter[/] select · [bold]Esc[/] cancel[/]", classes="modal-hint")
+            yield Static("[dim][bold]Enter[/] choose · [bold]Esc[/] back[/]", classes="modal-hint")
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         idx = event.list_view.index
@@ -96,6 +97,105 @@ class TextModal(ModalScreen[str]):
 
     def action_cancel(self) -> None:
         self.dismiss(None)
+
+
+class StartModal(ModalScreen[str]):
+    """A direct choice of how to begin or resume play."""
+
+    BINDINGS = [("escape", "quit", "Quit")]
+
+    def __init__(
+        self,
+        options: list[tuple[str, str]],
+        subtitle: str,
+        prompt: str = "Where do you want to begin?",
+    ) -> None:
+        super().__init__()
+        self._options = options
+        self._subtitle = subtitle
+        self._prompt = prompt
+
+    def compose(self) -> ComposeResult:
+        with Container(classes="modal-box startup-box"):
+            yield Static("[bold #a8d0ff]⚔  DMTUI[/]  [#8a93a3]SESSION START[/]", classes="modal-title")
+            yield Static(
+                f"[bold #e6ebf2]{self._prompt}[/]\n[dim]{self._subtitle}[/]"
+            )
+            yield ListView(
+                *[ListItem(Label(label, classes="modal-item")) for _, label in self._options],
+                id="modal-list",
+            )
+            yield Static("[dim][bold]Enter[/] start · [bold]Esc[/] quit[/]", classes="modal-hint")
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        index = event.list_view.index
+        if index is not None and 0 <= index < len(self._options):
+            self.dismiss(self._options[index][0])
+
+    def action_quit(self) -> None:
+        self.dismiss("quit")
+
+
+class PartyImportModal(ModalScreen[str | None]):
+    """Edit a campaign's party from D&D Beyond character links."""
+
+    BINDINGS = [("escape", "cancel", "Cancel")]
+
+    def compose(self) -> ComposeResult:
+        with Container(classes="modal-box party-import-box"):
+            yield Static("[bold #e6ebf2]EDIT PARTY[/]", classes="modal-title")
+            yield Static("[dim]Paste one D&D Beyond character link per line. Character IDs also work.[/]")
+            yield TextArea(id="party-import-input", placeholder="https://www.dndbeyond.com/characters/12345678\nhttps://www.dndbeyond.com/characters/87654321")
+            with Horizontal(classes="modal-buttons"):
+                yield Button("Import", variant="primary", id="import")
+                yield Button("Cancel", id="cancel")
+            yield Static("[dim][bold]Tab[/] moves to Import · [bold]Esc[/] back[/]", classes="modal-hint")
+
+    def on_mount(self) -> None:
+        self.query_one("#party-import-input", TextArea).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "import":
+            self.dismiss(self.query_one("#party-import-input", TextArea).text.strip() or None)
+        elif event.button.id == "cancel":
+            self.dismiss(None)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+class PartyPreviewModal(ModalScreen[str]):
+    """Review a campaign party before remembering it."""
+
+    BINDINGS = [("enter", "remember", "Remember"), ("escape", "cancel", "Cancel")]
+
+    def __init__(self, party_name: str, lines: list[str], has_failures: bool) -> None:
+        super().__init__()
+        self._party_name = party_name
+        self._lines = lines
+        self._has_failures = has_failures
+
+    def compose(self) -> ComposeResult:
+        status = " [dim]· some entries failed[/]" if self._has_failures else ""
+        with Container(classes="modal-box party-import-box"):
+            yield Static(f"[bold #e6ebf2]PARTY FOR {escape(self._party_name)}[/]{status}", classes="modal-title")
+            yield Static("\n".join(self._lines))
+            with Horizontal(classes="modal-buttons"):
+                yield Button("Remember party", variant="primary", id="remember")
+                yield Button("Back", id="cancel")
+            yield Static("[dim][bold]Enter[/] remember · [bold]Esc[/] back[/]", classes="modal-hint")
+
+    def action_remember(self) -> None:
+        self.dismiss("remember")
+
+    def action_cancel(self) -> None:
+        self.dismiss("cancel")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "remember":
+            self.dismiss("remember")
+        elif event.button.id == "cancel":
+            self.dismiss("cancel")
 
 
 class EncounterPreviewModal(ModalScreen[str]):
@@ -163,9 +263,9 @@ class ScratchpadModal(ModalScreen[str | None]):
             yield Static("[bold #e6ebf2]CAMPAIGN SCRATCHPAD[/]", classes="modal-title")
             yield TextArea(self._text, id="scratchpad-input", placeholder="Notes for the next session…")
             with Horizontal(classes="modal-buttons"):
-                yield Button("Save", variant="primary", id="save")
+                yield Button("Remember", variant="primary", id="remember")
                 yield Button("Cancel", id="cancel")
-            yield Static("[dim]Ctrl+Enter or Save · Esc cancel[/]", classes="modal-hint")
+            yield Static("[dim]Ctrl+Enter or Remember · Esc cancel[/]", classes="modal-hint")
 
     def on_mount(self) -> None:
         self.query_one("#scratchpad-input", TextArea).focus()
@@ -176,7 +276,7 @@ class ScratchpadModal(ModalScreen[str | None]):
             self._save()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "save":
+        if event.button.id == "remember":
             self._save()
         else:
             self.dismiss(None)
@@ -452,12 +552,12 @@ class HelpModal(ModalScreen[None]):
                 "  [bold]n[/] next turn   [bold]shift+i[/] initiative pass   [bold]+[/] duplicate monster\n"
                 "  [bold]Enter[/]/[bold]a[/] attack   [bold]d[/]/[bold]h[/] damage / heal (type amount, [bold]Enter[/] apply, [bold]Esc[/] cancel)\n"
                 "  [bold]0–9[/]/[bold]Backspace[/] edit the inline HP amount\n"
-                "  [bold]c[/] condition   [bold]shift+c[/] campaigns   [bold]m[/] quick monster   [bold]x[/] remove\n"
+                "  [bold]c[/] condition   [bold]shift+c[/] campaign   [bold]m[/] quick monster   [bold]x[/] remove\n"
                 "  [bold]ctrl+m[/]/[bold]b[/]/[bold]shift+m[/] monster library (SRD)   [bold]v[/] spellbook   [bold]r[/] roll init   [bold]shift+r[/] reset\n"
                 "  [bold]t[/] type initiative inline\n"
                 "  [bold]i[/] import PC   [bold]f[/] find   [bold]e[/] edit   [bold]shift+e[/] AI encounter   [bold]p[/] add PC   [bold]ctrl+n[/] new encounter\n"
-                "  [bold]ctrl+e[/] encounter templates   [bold]shift+c[/] campaign + scratchpad\n"
-                "  [bold]s[/] cycle views   [bold]ctrl+1/2/3[/] choose view   [bold]ctrl+s[/]/[bold]ctrl+l[/] save/load\n"
+                "  [bold]ctrl+e[/] prepared encounters   [bold]shift+c[/] campaign, party, and notes\n"
+                "  [bold]s[/] cycle views   [bold]ctrl+1/2/3[/] choose view   live encounter remembered automatically\n"
                 "  [bold]u[/]/[bold]shift+u[/] undo/redo   [bold]/[/] chat or [bold]/roll 2d6+4[/]   [bold]?[/] help\n"
                 "  [bold]q[/] quit   [bold]Esc[/] drop token / cancel\n\n"
                 "[bold #a8d0ff]Map[/]\n"
@@ -478,5 +578,5 @@ class ImportingModal(ModalScreen[None]):
 
     def compose(self) -> ComposeResult:
         with Container(classes="modal-box"):
-            yield Static("[bold #a8d0ff]Importing character…[/]", classes="modal-title")
-            yield Static("[dim]Contacting D&D Beyond — one moment.[/]", classes="modal-hint")
+            yield Static("[bold #a8d0ff]IMPORTING PARTY[/]", classes="modal-title")
+            yield Static("[dim]Reading characters from D&D Beyond…[/]", classes="modal-hint")

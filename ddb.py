@@ -40,6 +40,25 @@ def parse_ddb_url(url: str) -> int | None:
     return None
 
 
+def parse_ddb_urls(text: str) -> list[int]:
+    """Parse one D&D Beyond character URL or bare ID per line.
+
+    Invalid lines are intentionally skipped; the party setup flow reports
+    them alongside characters that could not be fetched.
+    """
+    ids: list[int] = []
+    seen: set[int] = set()
+    for line in text.splitlines():
+        value = line.strip()
+        if not value:
+            continue
+        cid = parse_ddb_url(value)
+        if cid is not None and cid not in seen:
+            seen.add(cid)
+            ids.append(cid)
+    return ids
+
+
 def _iter_modifiers(character: dict):
     mods = character.get("modifiers") or {}
     if isinstance(mods, dict):
@@ -364,4 +383,5 @@ def extract_combatant(character_id: int, data: dict) -> Combatant:
         attacks=attacks,
         traits=traits,
         spells=spells,
+        level=total_level,
     )

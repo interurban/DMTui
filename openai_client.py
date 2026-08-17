@@ -167,7 +167,8 @@ def plan_encounter(
                     "You are a fast D&D encounter setup assistant. Return only the structured plan. "
                     "Choose only exact names from the supplied catalog. Prefer existing SRD statblocks; "
                     "never invent a monster name, statblock, or ability. Use the party context to estimate "
-                    "difficulty when provided. For published adventures, mark difficulty Unknown unless "
+                    "difficulty from character levels and actual party strength (HP, AC, attacks, and "
+                    "spellcasting) when provided. For published adventures, mark difficulty Unknown unless "
                     "the description gives enough context. Keep the plan practical for a table-side DM."
                 ),
             },

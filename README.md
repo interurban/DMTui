@@ -45,6 +45,25 @@ export OPENAI_API_KEY="sk-your-key-here"
 
 The app loads `.env` automatically when it starts.
 
+On launch, DMTui asks where to begin: **Resume encounter**, start a new
+encounter with the active campaign, use a prepared encounter, switch campaigns,
+or start without one. The live encounter is remembered automatically in
+`encounter.json`; there is no manual save step. There is one resumable live
+encounter at a time, and starting another replaces that resume point.
+
+A campaign is the long-running game. It remembers its party roster, ruleset,
+and notes in the ignored `campaigns.json`. The party is not a separate saved
+object: choose **Edit party** and paste one D&D Beyond character URL or bare
+character ID per line. Those characters are fetched fresh when a new encounter
+starts. `Shift+C` opens the active campaign during play.
+Editing the party never rewrites the encounter already on the table; it takes
+effect the next time that campaign starts an encounter.
+
+Press `Shift+E` to describe an encounter in plain language. The preview uses
+the loaded party's character levels and aggregate strength—HP, AC, attack
+bonuses, proficiency, spell DCs, and roles—to guide the requested difficulty.
+The accepted lineup still resolves to existing built-in/SRD statblocks.
+
 For reference, the tracked `llm_config.json` contains only non-secret settings:
 
 ```json
@@ -75,18 +94,18 @@ cannot parse a character when D&D Beyond denies the service request.
 
 ### Preparation tools
 
-Use `Ctrl+E` to save or load named encounter templates. Saving captures the
-current creatures and positions as a prepared starting state: HP is restored,
-conditions are cleared, and initiative is left unrolled. Loading a template is
-undoable.
+Use `Ctrl+E` to save or start a prepared encounter. A prepared encounter stores
+only monsters and their starting positions; the active campaign supplies the
+party. Monsters return at full HP with clear conditions and unrolled initiative.
+Older templates that contain PCs are loaded safely—the embedded PCs are ignored.
 
 Monsters added from the quick picker or searchable library are scattered across
 the top-centre of the map's first four rows, keeping newly imported enemies
 visible and easy to distinguish from the party.
 
-Press `Shift+c` and choose **Edit campaign scratchpad** to keep multiline notes with
-the active campaign—NPC names, clues, loot, passwords, or anything else useful
-between sessions. `Ctrl+Enter` saves the scratchpad; `Esc` cancels.
+Press `Shift+C` and choose the active campaign's notes to keep NPC names, clues,
+loot, passwords, or anything else useful between sessions. `Ctrl+Enter`
+remembers the notes; `Esc` cancels.
 
 ## Keys
 
@@ -115,10 +134,9 @@ between sessions. `Ctrl+Enter` saves the scratchpad; `Esc` cancels.
 | `u` / `Shift+u` | undo / redo |
 | `s` | cycle Combat → DM Screen → Party Reference |
 | `Ctrl+1` / `Ctrl+2` / `Ctrl+3` | open Combat / DM Screen / Party Reference |
-| `Shift+c` | open campaigns; choose **Edit campaign scratchpad** for notes |
-| `Ctrl+s` / `Ctrl+l` | save / load the encounter to `encounter.json` |
-| `Ctrl+n` | new blank encounter |
-| `Ctrl+e` | save/load named encounter templates |
+| `Shift+c` | open the active campaign, party, and notes |
+| `Ctrl+n` | new encounter with the current campaign |
+| `Ctrl+e` | save/start prepared encounters |
 | `/` | ask the OpenAI DM assistant |
 | `/roll 2d6+4` | roll dice locally without using OpenAI |
 | `q` / `?` | quit / help |

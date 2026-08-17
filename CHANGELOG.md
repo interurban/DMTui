@@ -39,6 +39,23 @@ for D&D 5e DMs (Textual). Run: `dmtui`.
 - **AI encounter setup** — `Shift+E` turns a short encounter description into
   a previewed lineup using only existing built-in/SRD statblocks; accepting it
   adds fresh monsters with initiative unset.
+- **Party-aware encounter difficulty** — AI encounter generation now includes
+  imported character levels plus aggregate HP, AC, attack, proficiency, spell
+  DC, and role information when judging Easy through Deadly.
+- **Startup party setup** — fresh installs now open a splash menu with a
+  multiline D&D Beyond party importer; valid characters are previewed and
+  remembered locally by named campaign.
+- **Clear campaign model** — campaigns now own their party roster, ruleset, and
+  notes. A party is edited inside a campaign rather than saved or loaded as a
+  competing top-level object.
+- **Automatic encounter memory** — the live battlefield is remembered after
+  changes and can be resumed from startup; `Ctrl+S` / `Ctrl+L` are no longer
+  part of the interaction model.
+- **Prepared encounters** — named reusable setups now store monsters only and
+  combine with the current campaign party. Legacy templates with embedded PCs
+  remain loadable without duplicating the party.
+- **Outcome-first startup** — launch choices are resume, new encounter with the
+  active campaign, prepared encounter, switch campaign, or campaign-free play.
 - **Shifted-key reliability** — shifted letter shortcuts now use the uppercase
   key events Textual receives from a terminal, so `Shift+E` and the existing
   `Shift+C/I/M/R/U` commands dispatch correctly.

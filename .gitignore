@@ -2,6 +2,7 @@
 __pycache__/
 shots/
 encounter.json
+encounter.json.tmp
 encounters.json
 *.pyc
 campaigns.json

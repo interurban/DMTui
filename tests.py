@@ -4,6 +4,8 @@ import urllib.error
 import urllib.request
 import random
 import json
+import os
+import tempfile
 from unittest import mock
 
 from battle import (
@@ -15,7 +17,7 @@ from battle import (
     roll_dice,
     short_label,
 )
-from ddb import extract_combatant, fetch_character_data, parse_ddb_url
+from ddb import extract_combatant, fetch_character_data, parse_ddb_url, parse_ddb_urls
 
 
 class Seq:
@@ -327,6 +329,17 @@ def test_parse_ddb_url():
     assert parse_ddb_url("https://www.dndbeyond.com/characters/12345?foo=bar") == 12345
 
 
+def test_parse_ddb_urls_accepts_multiline_paste_and_deduplicates():
+    pasted = "\n".join([
+        "https://www.dndbeyond.com/characters/12",
+        "12",
+        "not a character",
+        "https://www.dndbeyond.com/characters/34",
+        "",
+    ])
+    assert parse_ddb_urls(pasted) == [12, 34]
+
+
 REALISTIC = {
     "character": {
         "name": "Baldrik",
@@ -389,6 +402,7 @@ def test_extract_combatant_realistic():
     assert c.name == "Baldrik" and c.kind == "PC"
     assert c.role == "Fighter 3"
     assert c.max_hp == 22 + 4 + 2 * 3 and c.hp == c.max_hp - 6   # +CON per level
+    assert c.level == 3
     assert c.ac == 10 + 2 + 1 + 1                                  # shield + dex + bonus
     assert c.init_mod == 1                                         # DEX 12
     assert c.saves == {1, 3}                                       # STR + CON
@@ -744,6 +758,28 @@ def test_combatant_snapshot_preserves_turn_reminder():
     assert loaded["reminder"] == "WIS save DC 14"
 
 
+def test_party_context_includes_levels_and_strength_signals():
+    from app import BattleApp
+
+    app = BattleApp()
+    app.combatants = [
+        Combatant(
+            "Fighter", "PC", hp=28, max_hp=32, ac=18, level=5, proficiency=3,
+            role="Human Fighter 5", attacks=["Longsword +7 · 1d8+4 sl"],
+        ),
+        Combatant(
+            "Wizard", "PC", hp=16, max_hp=20, ac=14, level=5, proficiency=3,
+            role="Elf Wizard 5", spell_dc=15,
+        ),
+    ]
+    context = app._party_context()
+    assert "levels 5, 5" in context
+    assert "total HP 44/52" in context
+    assert "AC 14-18" in context
+    assert "attack bonuses +7 to +7" in context
+    assert "spell DCs 15" in context
+
+
 def test_openai_response_preserves_compact_line_breaks():
     import json
 
@@ -806,7 +842,45 @@ def test_shifted_letter_bindings_use_terminal_key_events():
     assert bindings["M"] == "browse"
     assert bindings["R"] == "reset"
     assert bindings["U"] == "redo"
+    assert "ctrl+s" not in bindings and "ctrl+l" not in bindings
     assert not any(binding.key.startswith("shift+") for binding in BattleApp.BINDINGS)
+
+
+def test_saved_campaigns_put_active_first_and_keep_empty_campaigns():
+    from app import BattleApp
+
+    data = {
+        "active": "Zither Club",
+        "campaigns": {
+            "Empty": {"character_ids": []},
+            "Alpha Team": {"character_ids": [1]},
+            "Zither Club": {"character_ids": [2, "3"]},
+        },
+    }
+    assert BattleApp()._saved_campaigns(data) == [
+        ("Zither Club", 2),
+        ("Alpha Team", 1),
+        ("Empty", 0),
+    ]
+
+
+def test_live_encounter_is_remembered_with_campaign_context():
+    import app as appmod
+    from app import BattleApp
+
+    app = BattleApp()
+    app._session_started = True
+    app._session_campaign = "Lost Mine"
+    app.combatants = [Combatant("Goblin", "monster", hp=7, max_hp=7, ac=15)]
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "current-encounter.json")
+        with mock.patch.object(appmod, "SAVE_PATH", path):
+            assert app._remember_current_encounter()
+            remembered = app._current_encounter_read()
+    assert remembered is not None
+    assert remembered["version"] == 2
+    assert remembered["campaign"] == "Lost Mine"
+    assert remembered["combatants"][0]["name"] == "Goblin"
 
 
 def main() -> None:
@@ -820,9 +894,7 @@ def main() -> None:
 # Open5e SRD integration
 # ---------------------------------------------------------------------------
 
-import os
 import srd as srd_client
-import tempfile
 
 GOBLIN_SRD = {
     "name": "Goblin",

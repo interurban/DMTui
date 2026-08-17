@@ -66,6 +66,7 @@ class Combatant:
     traits: list[str] = field(default_factory=list)        # special abilities
     spells: list[str] = field(default_factory=list)        # spellcaster spells
     ddb_id: int | None = None                              # source D&D Beyond character id, if imported
+    level: int | None = None                               # total character level, when known
     reminder: str = ""                                    # surfaced when this creature's turn begins
 
     @property

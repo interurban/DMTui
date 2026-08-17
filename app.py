@@ -46,7 +46,7 @@ from battle import (
 import ddb
 import openai_client
 from ddb import ABILITY_NAMES
-from modals import EncounterPreviewModal, GeneratingModal, HelpModal, ImportingModal, ListModal, MonsterLibrary, NumberModal, ScratchpadModal, SpellBrowser, TextModal
+from modals import EncounterPreviewModal, GeneratingModal, HelpModal, ImportingModal, ListModal, MonsterLibrary, NumberModal, PartyImportModal, PartyPreviewModal, ScratchpadModal, SpellBrowser, StartModal, TextModal
 import srd as srd_client
 from widgets import CombatantRow, InitiativeList, LEFT_W, LogView, MapGrid
 from dm_screen import panel_text
@@ -57,7 +57,6 @@ ENCOUNTER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "encou
 
 DEFAULT_CAMPAIGN = "My Campaign"
 DEFAULT_RULESET = "2014"
-DEFAULT_CHARACTER_IDS = [112516506, 90060479, 91566422, 90060446]
 
 
 def _parse_coord(s: str) -> tuple[int, int] | None:
@@ -191,6 +190,10 @@ class BattleApp(App[None]):
     .modal-help { margin: 0 0 1 0; }
     .scratchpad-box { width: 72; height: 24; }
     #scratchpad-input { height: 15; margin-top: 0; }
+    .startup-box { width: 68; }
+    .startup-box #modal-list { height: auto; min-height: 7; max-height: 16; }
+    .party-import-box { width: 82; height: 28; }
+    #party-import-input { height: 18; margin-top: 0; }
     .modal-buttons { height: 3; align: right middle; }
     .modal-buttons Button { margin-left: 1; }
     Input { margin-top: 1; }
@@ -227,8 +230,8 @@ class BattleApp(App[None]):
         Binding("9", "hp_digit(9)", "9"),
         Binding("backspace", "hp_backspace", "Backspace"),
         Binding("c", "condition", "Condition"),
-        Binding("C", "campaign", "Campaign menu"),
-        Binding("ctrl+e", "encounter_templates", "Encounter templates"),
+        Binding("C", "campaign", "Campaign"),
+        Binding("ctrl+e", "encounter_templates", "Prepared encounters"),
         Binding("E", "ai_encounter", "AI encounter"),
         Binding("m", "monster", "Quick monster"),
         Binding("ctrl+m", "browse", "Monster library"),
@@ -246,8 +249,6 @@ class BattleApp(App[None]):
         Binding("u", "undo", "Undo"),
         Binding("U", "redo", "Redo"),
         Binding("s", "toggle_view", "Switch view"),
-        Binding("ctrl+s", "save", "Save"),
-        Binding("ctrl+l", "load", "Load"),
         Binding("q", "quit", "Quit"),
         Binding("slash", "chat", "Chat"),
     ]
@@ -276,6 +277,9 @@ class BattleApp(App[None]):
         self._spell_screen: SpellBrowser | None = None
         self.view_mode = "combat"
         self._initiative_pass = False
+        self._session_started = False
+        self._session_campaign: str | None = None
+        self._remembering = False
         self._setup()
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
@@ -364,7 +368,7 @@ class BattleApp(App[None]):
             else:
                 hints.update(
                     "  ·  ".join(
-                    [hint("s", "switch"), hint("i", "import"), hint("f", "find"), hint("shift+e", "AI encounter"), hint("shift+c", "campaigns"), hint("/", "chat"), hint("?", "help"), hint("q", "quit")]
+                    [hint("s", "switch"), hint("i", "import"), hint("f", "find"), hint("shift+e", "AI encounter"), hint("shift+c", "campaign"), hint("/", "chat"), hint("?", "help"), hint("q", "quit")]
                     )
                 )
         elif self._chat_busy:
@@ -492,7 +496,7 @@ class BattleApp(App[None]):
             "active": DEFAULT_CAMPAIGN,
             "campaigns": {
                 DEFAULT_CAMPAIGN: {
-                    "character_ids": list(DEFAULT_CHARACTER_IDS),
+                    "character_ids": [],
                     "ruleset": DEFAULT_RULESET,
                 }
             },
@@ -514,9 +518,21 @@ class BattleApp(App[None]):
         ids = camp.get("character_ids") or []
         return [int(x) for x in ids if isinstance(x, int) or str(x).isdigit()]
 
+    def _saved_campaigns(self, data: dict) -> list[tuple[str, int]]:
+        """Return campaigns with their party size, active campaign first."""
+        active = data.get("active")
+        campaigns = [
+            (str(name), len(self._campaign_ids(name, data)))
+            for name, campaign in data.get("campaigns", {}).items()
+            if isinstance(campaign, dict)
+        ]
+        return sorted(campaigns, key=lambda item: (item[0] != active, item[0].casefold()))
+
     def _campaign_ruleset(self) -> str:
         data = self._campaigns_read()
-        active = data.get("active") or DEFAULT_CAMPAIGN
+        if self._session_started and self._session_campaign is None:
+            return DEFAULT_RULESET
+        active = self._session_campaign or data.get("active") or DEFAULT_CAMPAIGN
         campaign = data.get("campaigns", {}).get(active, {})
         if isinstance(campaign, dict):
             return str(campaign.get("ruleset") or DEFAULT_RULESET)
@@ -601,70 +617,252 @@ class BattleApp(App[None]):
 
     async def _boot_campaign(self) -> None:
         await self._wait_map_ready()
-        data = self._campaigns_read()
-        name = data.get("active") or DEFAULT_CAMPAIGN
+        while True:
+            data = self._campaigns_read()
+            campaigns = self._saved_campaigns(data)
+            active = str(data.get("active") or (campaigns[0][0] if campaigns else DEFAULT_CAMPAIGN))
+            party_size = len(self._campaign_ids(active, data))
+            current = self._current_encounter_read()
+            prepared_count = len(self._templates_read().get("templates", {}))
+            options = []
+            if current is not None:
+                count = len(current.get("combatants", []))
+                round_number = current.get("round", 1)
+                current_campaign = current.get("campaign") or "No campaign"
+                options.append((
+                    "resume",
+                    f"[bold #a8d0ff]Resume encounter[/]\n  [dim]{escape(str(current_campaign))} · {count} creatures · round {escape(str(round_number))}[/]",
+                ))
+            if party_size:
+                options.append((
+                    f"new:{active}",
+                    f"New encounter with [bold #e6ebf2]{escape(active)}[/]\n  [dim]{party_size} adventurer{'s' if party_size != 1 else ''} · clean battlefield[/]",
+                ))
+            else:
+                options.append((
+                    f"edit:{active}",
+                    f"[bold #e6ebf2]Add a party to {escape(active)}[/]\n  [dim]Import D&D Beyond characters[/]",
+                ))
+            options.extend([
+                (
+                    "prepared",
+                    f"Prepared encounters\n  [dim]{prepared_count} reusable setup{'s' if prepared_count != 1 else ''}[/]",
+                ),
+                ("switch", f"Switch campaign\n  [dim]Current: {escape(active)}[/]"),
+                ("blank", "Start without a campaign\n  [dim]An empty, remembered battlefield[/]"),
+                ("quit", "Quit"),
+            ])
+            choice = await self.push_screen(
+                StartModal(options, "Campaigns remember the party and notes. Encounters remember the fight."),
+                wait_for_dismiss=True,
+            )
+            if choice == "resume" and current is not None:
+                self._resume_current_encounter(current)
+                return
+            if choice and choice.startswith("new:"):
+                await self._start_campaign_encounter(choice[4:])
+                return
+            if choice and choice.startswith("edit:"):
+                saved = await self._edit_campaign_party_flow(choice[5:])
+                if saved:
+                    await self._start_campaign_encounter(saved)
+                    return
+                continue
+            if choice == "prepared":
+                template = await self._choose_prepared_encounter()
+                if template:
+                    await self._start_campaign_encounter(active)
+                    self._load_template(template, self._templates_read(), record_undo=False)
+                    return
+                continue
+            if choice == "switch":
+                await self._choose_campaign_flow()
+                continue
+            if choice == "blank":
+                self._start_blank_encounter()
+                self._log("Blank encounter — add PCs ([bold]p[/]) and monsters ([bold]m[/]).", kind="select")
+                return
+            self.exit()
+            return
+
+    async def _start_campaign_encounter(self, name: str) -> None:
+        self._session_started = False
+        self.combatants = []
+        self._turn = None
+        self._sel = None
+        self._moving = False
+        self.view_mode = "combat"
         placed = await self._import_campaign(name)
         self.round = 1
         self._turn = self.combatants[0] if self.combatants else None
         self._sel = self.combatants[0] if self.combatants else None
         self._sort_combatants()
+        self._session_campaign = name
+        self._session_started = True
+        self._remember_current_encounter()
         if placed:
-            self._log(f"Campaign '{name}' loaded — {placed} PC{'s' if placed != 1 else ''} at the ready.", kind="import")
+            self._log(f"New encounter in '{escape(name)}' — {placed} PC{'s' if placed != 1 else ''} ready.", kind="import")
         else:
-            self._log(f"Campaign '{name}' has no characters yet — press [bold]p[/] to add or [bold]i[/] to import.", kind="info")
+            self._log(f"New encounter in '{escape(name)}' — this campaign has no party yet.", kind="info")
+
+    def _start_blank_encounter(self) -> None:
+        self.combatants = []
+        self.round = 1
+        self._turn = None
+        self._sel = None
+        self._moving = False
+        self.view_mode = "combat"
+        self._session_campaign = None
+        self._session_started = True
+        self._rebuild_rows()
+        self._remember_current_encounter()
 
     def action_campaign(self) -> None:
         self.run_worker(self._campaign_flow())
 
     async def _campaign_flow(self) -> None:
         data = self._campaigns_read()
-        active = data.get("active")
-        options = []
-        for name, camp in sorted(data.get("campaigns", {}).items(), key=lambda kv: (kv[0] != active, kv[0])):
-            n = len(camp.get("character_ids", [])) if isinstance(camp, dict) else 0
-            mark = "  [green]✓[/]" if name == active else ""
-            options.append((f"load:{name}", f"[bold #a8d0ff]LOAD[/] {name}{mark}  [dim]({n} PC{'s' if n != 1 else ''})[/]"))
-        options.append(("save", "Save current party as a new campaign"))
-        options.append(("notes", "Edit campaign scratchpad"))
-        options.append(("blank", "[bold #d95841]Start a blank encounter[/]"))
-        picked = await self.push_screen(ListModal("CAMPAIGNS", options), wait_for_dismiss=True)
-        if not picked:
-            return
-        if picked.startswith("load:"):
-            await self._load_campaign_flow(picked[5:])
-        elif picked == "save":
-            await self._save_campaign_flow()
+        active = str(data.get("active") or DEFAULT_CAMPAIGN)
+        options = [
+            ("switch", "Switch campaign and start a new encounter"),
+            ("party", f"Edit party for {escape(active)}"),
+            ("notes", f"Notes for {escape(active)}"),
+            ("new_campaign", "Create a campaign from this party"),
+            ("new_encounter", f"Start a new encounter in {escape(active)}"),
+            ("blank", "Start without a campaign"),
+        ]
+        picked = await self.push_screen(ListModal(f"CAMPAIGN · {escape(active)}", options), wait_for_dismiss=True)
+        if picked == "switch":
+            name = await self._choose_campaign_flow()
+            if name and name != self._session_campaign:
+                self._push_undo(restore_nav=True)
+                await self._start_campaign_encounter(name)
+        elif picked == "party":
+            await self._edit_campaign_party_flow(active)
         elif picked == "notes":
             await self._scratchpad_flow()
+        elif picked == "new_campaign":
+            await self._new_campaign_from_current_party_flow()
+        elif picked == "new_encounter":
+            self._push_undo(restore_nav=True)
+            await self._start_campaign_encounter(active)
         elif picked == "blank":
-            self.action_new_encounter()
+            self._push_undo(restore_nav=True)
+            self._start_blank_encounter()
+            self._log("Encounter started without a campaign.", kind="select")
 
-    async def _load_campaign_flow(self, name: str) -> None:
-        self._push_undo(restore_nav=True)
-        self.combatants = []
-        self._moving = False
-        placed = await self._import_campaign(name)
-        self.round = 1
-        self._turn = self.combatants[0] if self.combatants else None
-        self._sel = self.combatants[0] if self.combatants else None
-        self._sort_combatants()
-        self._log(f"Campaign '{name}' loaded — {placed} PC{'s' if placed != 1 else ''}.", kind="import")
-        self._rebuild_rows()
+    async def _choose_campaign_flow(self) -> str | None:
+        data = self._campaigns_read()
+        active = data.get("active")
+        options = []
+        for name, n in self._saved_campaigns(data):
+            mark = "  [green]✓[/]" if name == active else ""
+            options.append((f"campaign:{name}", f"{escape(name)}{mark}  [dim]({n} in party)[/]"))
+        options.append(("new", "+ Create a campaign"))
+        options.append(("back", "Back"))
+        picked = await self.push_screen(ListModal("SWITCH CAMPAIGN", options), wait_for_dismiss=True)
+        if not picked or picked == "back":
+            return None
+        if picked.startswith("campaign:"):
+            name = picked[9:]
+            self._set_active_campaign(name)
+            return name
+        if picked == "new":
+            return await self._new_campaign_flow()
+        return None
 
-    async def _save_campaign_flow(self) -> None:
+    async def _new_campaign_flow(self) -> str | None:
         name = await self.push_screen(
-            TextModal("SAVE CAMPAIGN", "campaign name (e.g. My Campaign)", confirm="Save"),
+            TextModal("CREATE CAMPAIGN", "campaign name (e.g. Lost Mine)", confirm="Next"),
             wait_for_dismiss=True,
         )
         if not name:
-            return
+            return None
+        return await self._edit_campaign_party_flow(name)
+
+    async def _edit_campaign_party_flow(self, name: str) -> str | None:
+        data = self._campaigns_read()
+        pasted = await self.push_screen(PartyImportModal(), wait_for_dismiss=True)
+        if not pasted:
+            return None
+        ids = ddb.parse_ddb_urls(pasted)
+        if not ids:
+            self._log("No valid D&D Beyond URLs or character IDs found.", kind="warn")
+            return None
+
+        imported: list[Combatant] = []
+        failures: list[str] = []
+        import_modal = ImportingModal()
+        self.push_screen(import_modal)
+        try:
+            for cid in ids:
+                try:
+                    pc = await self._fetch_combatant(cid)
+                except Exception as exc:
+                    pc = None
+                    failures.append(f"{cid}: {exc}")
+                if pc is None:
+                    if not any(item.startswith(f"{cid}:") for item in failures):
+                        failures.append(f"{cid}: character could not be read")
+                else:
+                    imported.append(pc)
+        finally:
+            import_modal.dismiss()
+
+        if not imported:
+            self._log("No characters could be imported; the party was not changed.", kind="warn")
+            return None
+        lines = [f"  {pc.name}  [dim]level {pc.level or '?'} · HP {pc.hp}/{pc.max_hp} · AC {pc.ac}[/]" for pc in imported]
+        if failures:
+            lines.append("")
+            lines.append("[bold #d95841]Failed:[/]")
+            lines.extend(f"  [#d95841]{failure}[/]" for failure in failures)
+        accepted = await self.push_screen(PartyPreviewModal(name, lines, bool(failures)), wait_for_dismiss=True)
+        if accepted != "remember":
+            return None
+
+        campaign = data.setdefault("campaigns", {}).setdefault(name, {})
+        if not isinstance(campaign, dict):
+            campaign = {}
+            data["campaigns"][name] = campaign
+        campaign["character_ids"] = [pc.ddb_id for pc in imported if pc.ddb_id is not None]
+        campaign.setdefault("ruleset", DEFAULT_RULESET)
+        data["active"] = name
+        try:
+            self._campaigns_write(data)
+        except OSError as exc:
+            self._log(f"Party could not be remembered: {exc}", kind="warn")
+            return None
+        self._log(f"Party for '{escape(name)}' remembered — {len(imported)} character{'s' if len(imported) != 1 else ''}.", kind="import")
+        return name
+
+    async def _new_campaign_from_current_party_flow(self) -> str | None:
+        name = await self.push_screen(
+            TextModal("CREATE CAMPAIGN", "campaign name (e.g. Lost Mine)", confirm="Create"),
+            wait_for_dismiss=True,
+        )
+        if not name:
+            return None
         ids = [c.ddb_id for c in self.combatants if c.ddb_id]
         data = self._campaigns_read()
         data.setdefault("campaigns", {})
-        data["campaigns"][name] = {"character_ids": ids, "ruleset": self._campaign_ruleset()}
+        campaign = data["campaigns"].setdefault(name, {})
+        if not isinstance(campaign, dict):
+            campaign = {}
+            data["campaigns"][name] = campaign
+        campaign["character_ids"] = ids
+        campaign.setdefault("ruleset", self._campaign_ruleset())
         data["active"] = name
-        self._campaigns_write(data)
-        self._log(f"Campaign '{name}' saved — {len(ids)} character{'s' if len(ids) != 1 else ''}.", kind="import")
+        try:
+            self._campaigns_write(data)
+        except OSError as exc:
+            self._log(f"Campaign could not be created: {exc}", kind="warn")
+            return None
+        if self._session_started:
+            self._session_campaign = name
+            self._remember_current_encounter()
+        self._log(f"Campaign '{escape(name)}' created with {len(ids)} party member{'s' if len(ids) != 1 else ''}.", kind="import")
+        return name
 
     async def _scratchpad_flow(self) -> None:
         data = self._campaigns_read()
@@ -681,11 +879,11 @@ class BattleApp(App[None]):
         try:
             self._campaigns_write(data)
         except OSError as exc:
-            self._log(f"Scratchpad save failed: {exc}", kind="warn")
+            self._log(f"Campaign notes could not be remembered: {exc}", kind="warn")
             return
-        self._log(f"Campaign scratchpad saved ({len(notes.splitlines())} lines).", kind="import")
+        self._log(f"Campaign notes remembered ({len(notes.splitlines())} lines).", kind="import")
 
-    # -- named encounter templates ------------------------------------------
+    # -- prepared encounters -------------------------------------------------
 
     def _templates_read(self) -> dict:
         try:
@@ -719,7 +917,33 @@ class BattleApp(App[None]):
 
     def _party_context(self) -> str:
         pcs = [c for c in self.combatants if c.kind == "PC"]
-        return f"{len(pcs)} PC{'s' if len(pcs) != 1 else ''}; level unknown"
+        if not pcs:
+            return "No PCs loaded; use a conservative generic difficulty."
+        levels = [c.level for c in pcs if c.level is not None]
+        hp_total = sum(max(0, c.max_hp) for c in pcs)
+        hp_current = sum(max(0, c.hp) for c in pcs)
+        acs = [c.ac for c in pcs]
+        profs = [c.proficiency for c in pcs if c.proficiency is not None]
+        spell_dcs = [c.spell_dc for c in pcs if c.spell_dc is not None]
+        attack_bonuses = []
+        for c in pcs:
+            for attack in c.attacks:
+                match = re.search(r"\s([+-]\d+)\s*·", attack)
+                if match:
+                    attack_bonuses.append(int(match.group(1)))
+        roles = ", ".join(c.role for c in pcs if c.role) or "roles unknown"
+        level_text = ", ".join(str(level) for level in levels) if levels else "unknown"
+        attack_text = (
+            f"+{min(attack_bonuses)} to +{max(attack_bonuses)}"
+            if attack_bonuses else "unknown"
+        )
+        return (
+            f"{len(pcs)} PC{'s' if len(pcs) != 1 else ''}; levels {level_text}; "
+            f"total HP {hp_current}/{hp_total}; AC {min(acs)}-{max(acs)} (avg {sum(acs) / len(acs):.1f}); "
+            f"proficiency +{min(profs) if profs else 'unknown'} to +{max(profs) if profs else 'unknown'}; "
+            f"attack bonuses {attack_text}; spell DCs {', '.join(map(str, spell_dcs)) or 'none'}; "
+            f"roles: {roles}"
+        )
 
     async def _ai_encounter_flow(self) -> None:
         description = await self.push_screen(
@@ -786,11 +1010,11 @@ class BattleApp(App[None]):
     async def _encounter_templates_flow(self) -> None:
         data = self._templates_read()
         options = [
-            (f"load:{name}", f"[bold #a8d0ff]LOAD[/] {name}")
+            (f"load:{name}", f"[bold #a8d0ff]{escape(name)}[/]")
             for name in sorted(data.get("templates", {}))
         ]
-        options.append(("save", "Save current encounter as template"))
-        picked = await self.push_screen(ListModal("ENCOUNTER TEMPLATES", options), wait_for_dismiss=True)
+        options.append(("save", "Save these monsters as a prepared encounter"))
+        picked = await self.push_screen(ListModal("PREPARED ENCOUNTERS", options), wait_for_dismiss=True)
         if not picked:
             return
         if picked == "save":
@@ -798,20 +1022,38 @@ class BattleApp(App[None]):
         elif picked.startswith("load:"):
             self._load_template(picked[5:], data)
 
+    async def _choose_prepared_encounter(self) -> str | None:
+        data = self._templates_read()
+        options = [
+            (f"load:{name}", escape(name))
+            for name in sorted(data.get("templates", {}))
+        ]
+        if not options:
+            await self.push_screen(
+                ListModal("PREPARED ENCOUNTERS", [("back", "No prepared encounters yet · Esc to go back")]),
+                wait_for_dismiss=True,
+            )
+            return None
+        picked = await self.push_screen(ListModal("PREPARED ENCOUNTERS", options), wait_for_dismiss=True)
+        return picked[5:] if picked and picked.startswith("load:") else None
+
     async def _save_template_flow(self) -> None:
-        if not self.combatants:
-            self._log("Add creatures before saving an encounter template.", kind="warn")
+        monsters = [c for c in self.combatants if c.kind != "PC"]
+        if not monsters:
+            self._log("Add monsters before saving a prepared encounter.", kind="warn")
             return
         name = await self.push_screen(
-            TextModal("SAVE ENCOUNTER TEMPLATE", "name (e.g. Goblin Ambush)", confirm="Save"),
+            TextModal("SAVE PREPARED ENCOUNTER", "name (e.g. Goblin Ambush)", confirm="Save"),
             wait_for_dismiss=True,
         )
         if not name:
             return
         data = self._templates_read()
         snap = self._snapshot()
+        snap["combatants"] = [self._combatant_snap(c) for c in monsters]
+        snap["campaign"] = None
         snap["round"] = 1
-        snap["turn"] = 0
+        snap["turn"] = None
         snap["sel"] = 0
         snap["moving"] = False
         snap["view_mode"] = "combat"
@@ -826,23 +1068,52 @@ class BattleApp(App[None]):
         try:
             self._templates_write(data)
         except OSError as exc:
-            self._log(f"Template save failed: {exc}", kind="warn")
+            self._log(f"Prepared encounter save failed: {exc}", kind="warn")
             return
-        self._log(f"Encounter template '{name}' saved.", kind="import")
+        self._log(f"Prepared encounter '{escape(name)}' saved — {len(monsters)} monster{'s' if len(monsters) != 1 else ''}.", kind="import")
 
-    def _load_template(self, name: str, data: dict) -> None:
+    def _load_template(self, name: str, data: dict, record_undo: bool = True) -> None:
         entry = data.get("templates", {}).get(name)
         snap = entry.get("snapshot") if isinstance(entry, dict) else None
         if not isinstance(snap, dict) or not isinstance(snap.get("combatants"), list):
-            self._log(f"Template '{name}' is corrupt.", kind="warn")
+            self._log(f"Prepared encounter '{escape(name)}' is corrupt.", kind="warn")
             return
-        self._push_undo(restore_nav=True)
+        if record_undo:
+            self._push_undo(restore_nav=True)
+        merged = copy.deepcopy(snap)
+        party = [self._combatant_snap(c) for c in self.combatants if c.kind == "PC"]
+        for pc in party:
+            pc["init"] = None
+            pc["conditions"] = []
+        monsters = [
+            copy.deepcopy(creature)
+            for creature in snap["combatants"]
+            if isinstance(creature, dict) and creature.get("kind") != "PC"
+        ]
+        merged["combatants"] = party + monsters
+        merged["round"] = 1
+        merged["turn"] = None
+        merged["sel"] = len(party) if monsters else (0 if party else None)
+        merged["moving"] = False
+        merged["view_mode"] = "combat"
+        merged["campaign"] = self._session_campaign
         try:
-            self._restore(snap, keep_nav=False)
+            self._restore(merged, keep_nav=False)
         except (TypeError, ValueError, KeyError) as exc:
-            self._log(f"Template load failed: {exc}", kind="warn")
+            self._log(f"Prepared encounter could not start: {exc}", kind="warn")
             return
-        self._log(f"Loaded encounter template '{name}'.", kind="import")
+        placed: list[Combatant] = []
+        moved = False
+        for creature in self.combatants:
+            if any((other.x, other.y) == (creature.x, creature.y) for other in placed):
+                spot = find_free_spot(placed, MAP_COLS, MAP_ROWS)
+                if spot is not None:
+                    creature.x, creature.y = spot
+                    moved = True
+            placed.append(creature)
+        if moved:
+            self._refresh_all()
+        self._log(f"Started prepared encounter '{escape(name)}' with the current campaign party.", kind="import")
 
     # -- undo / redo / persistence ------------------------------------------
 
@@ -856,12 +1127,14 @@ class BattleApp(App[None]):
             "passive_perception": c.passive_perception, "spell_dc": c.spell_dc,
             "attacks": list(c.attacks),
             "traits": list(c.traits), "spells": list(c.spells), "ddb_id": c.ddb_id,
+            "level": c.level,
             "reminder": c.reminder,
         }
 
     def _snapshot(self) -> dict:
         return {
-            "version": 1,
+            "version": 2,
+            "campaign": self._session_campaign,
             "combatants": [self._combatant_snap(c) for c in self.combatants],
             "round": self.round,
             "turn": self.combatants.index(self._turn) if self._turn is not None else None,
@@ -869,6 +1142,55 @@ class BattleApp(App[None]):
             "moving": self._moving,
             "view_mode": self.view_mode,
         }
+
+    def _current_encounter_read(self) -> dict | None:
+        try:
+            with open(SAVE_PATH, encoding="utf-8") as f:
+                snap = json.load(f)
+        except (OSError, ValueError, TypeError):
+            return None
+        if not isinstance(snap, dict) or not isinstance(snap.get("combatants"), list):
+            return None
+        required = {"name", "kind", "hp", "max_hp", "ac"}
+        for creature in snap["combatants"]:
+            if not isinstance(creature, dict) or not required.issubset(creature):
+                return None
+            if "stats" in creature and not isinstance(creature["stats"], dict):
+                return None
+        return snap
+
+    def _remember_current_encounter(self) -> bool:
+        """Atomically remember the live battlefield without interrupting play."""
+        if not self._session_started or self._remembering:
+            return False
+        self._remembering = True
+        temp_path = f"{SAVE_PATH}.tmp"
+        try:
+            with open(temp_path, "w", encoding="utf-8") as f:
+                json.dump(self._snapshot(), f, indent=2)
+            os.replace(temp_path, SAVE_PATH)
+        except (OSError, TypeError, ValueError):
+            return False
+        finally:
+            self._remembering = False
+        return True
+
+    def _resume_current_encounter(self, snap: dict) -> None:
+        campaign = snap.get("campaign")
+        data = self._campaigns_read()
+        if isinstance(campaign, str) and campaign in data.get("campaigns", {}):
+            self._set_active_campaign(campaign)
+            self._session_campaign = campaign
+        else:
+            self._session_campaign = None
+        self._session_started = False
+        self._restore(snap, keep_nav=False)
+        self._session_started = True
+        self._remember_current_encounter()
+        self._log(
+            f"Encounter resumed — {len(self.combatants)} creatures, round {self.round}.",
+            kind="import",
+        )
 
     def _push_undo(self, restore_nav: bool = False) -> None:
         snap = self._snapshot()
@@ -915,6 +1237,10 @@ class BattleApp(App[None]):
         else:
             self.round = round_val
             self.view_mode = snap.get("view_mode", "combat") if snap.get("view_mode") in {"combat", "dm_screen", "party"} else "combat"
+            campaign = snap.get("campaign")
+            self._session_campaign = campaign if isinstance(campaign, str) else None
+            if self._session_campaign:
+                self._set_active_campaign(self._session_campaign)
             self._turn = (
                 new_combatants[turn_i]
                 if n and isinstance(turn_i, int) and 0 <= turn_i < n
@@ -946,39 +1272,27 @@ class BattleApp(App[None]):
         self._log("Redid change.", kind="select")
 
     def action_save(self) -> None:
-        try:
-            with open(SAVE_PATH, "w") as f:
-                json.dump(self._snapshot(), f, indent=2)
-        except OSError as exc:
-            self._log(f"Save failed: {exc}", kind="warn")
-            return
-        self._log(f"Encounter saved to {SAVE_PATH}.", kind="import")
+        if self._remember_current_encounter():
+            self._log("Encounter remembered.", kind="import")
+        else:
+            self._log("Encounter could not be remembered.", kind="warn")
 
     def action_load(self) -> None:
-        try:
-            with open(SAVE_PATH) as f:
-                snap = json.load(f)
-        except OSError as exc:
-            self._log(f"No saved encounter ({exc}).", kind="warn")
-            return
-        except (ValueError, TypeError) as exc:
-            self._log(f"Save file corrupt: {exc}", kind="warn")
-            return
-        if not isinstance(snap, dict) or not isinstance(snap.get("combatants"), list):
-            self._log("Save file corrupt: expected an encounter snapshot.", kind="warn")
+        snap = self._current_encounter_read()
+        if snap is None:
+            self._log("No remembered encounter to resume.", kind="warn")
             return
         before = self._snapshot()
         try:
-            self._restore(snap, keep_nav=False)
+            self._resume_current_encounter(snap)
         except (TypeError, ValueError, KeyError) as exc:
-            self._log(f"Save file corrupt: {exc}", kind="warn")
+            self._log(f"Remembered encounter is corrupt: {exc}", kind="warn")
             return
         before["restore_nav"] = True
         self._undo.append(before)
         if len(self._undo) > 50:
             self._undo.pop(0)
         self._redo.clear()
-        self._log(f"Loaded encounter — {len(self.combatants)} creatures, round {self.round}.", kind="import")
 
     # -- rows & refresh ----------------------------------------------------
 
@@ -1038,6 +1352,7 @@ class BattleApp(App[None]):
                 else "Party Reference · secret checks"
             )
         )
+        self._remember_current_encounter()
 
     def _refresh_map(self) -> None:
         global MAP_COLS, MAP_ROWS
@@ -1235,6 +1550,7 @@ class BattleApp(App[None]):
         self._messages.append((text, kind, in_log))
         if len(self._messages) > 200:
             self._messages.pop(0)
+        self._remember_current_encounter()
         self._refresh_log()
 
     def _party_conditions_markup(self) -> str:
@@ -1287,7 +1603,7 @@ class BattleApp(App[None]):
         if self.view_mode != "combat":
             return "Read-only reference  ·  s switch  ·  Ctrl+1 combat"
         return "  ·  ".join(
-            [hint("ctrl+s", "save"), hint("ctrl+l", "load"), hint("u", "undo"), hint("shift+u", "redo")]
+            ["[dim]remembered automatically[/]", hint("u", "undo"), hint("shift+u", "redo")]
         )
 
     def _detail_status_text(self) -> str:
@@ -2111,7 +2427,7 @@ class BattleApp(App[None]):
             self._log(f"{c.name} updated.", kind="select")
 
         if picked == "name":
-            val = await self.push_screen(TextModal("EDIT NAME", c.name, confirm="Save"), wait_for_dismiss=True)
+            val = await self.push_screen(TextModal("EDIT NAME", c.name, confirm="Apply"), wait_for_dismiss=True)
             if val and val != c.name:
                 do(lambda: setattr(c, "name", val))
         elif picked == "max_hp":
@@ -2130,15 +2446,15 @@ class BattleApp(App[None]):
             if val is not None and val != c.init_mod:
                 do(lambda: setattr(c, "init_mod", val))
         elif picked == "role":
-            val = await self.push_screen(TextModal("EDIT ROLE", c.role, confirm="Save"), wait_for_dismiss=True)
+            val = await self.push_screen(TextModal("EDIT ROLE", c.role, confirm="Apply"), wait_for_dismiss=True)
             if val and val != c.role:
                 do(lambda: setattr(c, "role", val))
         elif picked == "note":
-            val = await self.push_screen(TextModal("EDIT NOTE", c.note, confirm="Save"), wait_for_dismiss=True)
+            val = await self.push_screen(TextModal("EDIT NOTE", c.note, confirm="Apply"), wait_for_dismiss=True)
             if val and val != c.note:
                 do(lambda: setattr(c, "note", val))
         elif picked == "reminder":
-            val = await self.push_screen(TextModal("EDIT TURN REMINDER", c.reminder, confirm="Save"), wait_for_dismiss=True)
+            val = await self.push_screen(TextModal("EDIT TURN REMINDER", c.reminder, confirm="Apply"), wait_for_dismiss=True)
             if val != c.reminder:
                 do(lambda: setattr(c, "reminder", val or ""))
         elif picked.startswith("stat:"):
@@ -2179,22 +2495,25 @@ class BattleApp(App[None]):
         self.run_worker(self._new_encounter_flow())
 
     async def _new_encounter_flow(self) -> None:
+        campaign = self._session_campaign
+        destination = (
+            f"Start a new encounter in {escape(campaign)}"
+            if campaign else "Start without a campaign"
+        )
         if self.combatants:
             options = [
-                ("yes", "[bold #d95841]Start a blank encounter[/]"),
+                ("yes", f"[bold #d95841]{destination}[/]"),
                 ("no", "Cancel"),
             ]
             picked = await self.push_screen(ListModal("NEW ENCOUNTER?", options), wait_for_dismiss=True)
             if picked != "yes":
                 return
         self._push_undo(restore_nav=True)
-        self.combatants = []
-        self.round = 1
-        self._turn = None
-        self._sel = None
-        self._moving = False
-        self._rebuild_rows()
-        self._log("Blank encounter — add PCs ([bold]p[/]) and monsters ([bold]m[/]).", kind="select")
+        if campaign:
+            await self._start_campaign_encounter(campaign)
+        else:
+            self._start_blank_encounter()
+            self._log("Encounter started without a campaign.", kind="select")
 
     # -- misc ---------------------------------------------------------------
 
