@@ -20,8 +20,10 @@ packages = ["dmtui"]
 py-modules = [
     "app",
     "battle",
+    "campaigns",
     "ddb",
     "dm_screen",
+    "encounter_store",
     "modals",
     "openai_client",
     "srd",

@@ -4,6 +4,8 @@ shots/
 encounter.json
 encounter.json.tmp
 encounters.json
+campaign-encounters.json
+campaign-encounters.json.tmp
 *.pyc
 campaigns.json
 .cache/

@@ -18,6 +18,8 @@ from battle import (
     short_label,
 )
 from ddb import extract_combatant, fetch_character_data, parse_ddb_url, parse_ddb_urls
+import campaigns as campaign_store
+import encounter_store
 
 
 class Seq:
@@ -864,6 +866,102 @@ def test_saved_campaigns_put_active_first_and_keep_empty_campaigns():
     ]
 
 
+def test_campaign_book_migrates_legacy_ids_and_keeps_manual_members():
+    book = campaign_store.normalize_book({
+        "active": "Lost Mine",
+        "campaigns": {
+            "Lost Mine": {
+                "character_ids": [12, "34", 12],
+                "ruleset": "2014",
+                "notes": "Find Gundren",
+            },
+            "Manual Game": {
+                "party": [{"name": "Borin"}, {"name": "borin"}, {"ddb_id": 56, "name": "Nix"}],
+                "ruleset": "2024",
+            },
+        },
+    })
+    assert book["version"] == 2
+    assert book["campaigns"]["Lost Mine"]["party"] == [{"ddb_id": 12}, {"ddb_id": 34}]
+    assert "character_ids" not in book["campaigns"]["Lost Mine"]
+    assert book["campaigns"]["Manual Game"]["party"] == [
+        {"name": "Borin"},
+        {"name": "Nix", "ddb_id": 56},
+    ]
+
+
+def test_campaign_book_roundtrip_preserves_campaign_owned_party():
+    data = {
+        "active": "Stone Sea",
+        "campaigns": {
+            "Stone Sea": {
+                "party": [{"name": "Mara"}, {"name": "Tovin", "ddb_id": 91}],
+                "ruleset": "2024",
+                "notes": "North wind",
+            }
+        },
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "campaigns.json")
+        campaign_store.write_book(path, data)
+        loaded = campaign_store.read_book(path)
+    assert campaign_store.party_for(loaded, "Stone Sea") == data["campaigns"]["Stone Sea"]["party"]
+    assert loaded["campaigns"]["Stone Sea"]["notes"] == "North wind"
+
+
+def test_startup_menu_is_onboarding_when_campaign_book_is_empty():
+    from app import BattleApp
+
+    options, prompt, subtitle = BattleApp()._startup_menu(campaign_store.empty_book(), None, 0)
+    assert [key for key, _label in options] == ["setup", "sample", "blank", "quit"]
+    assert prompt == "Open your DM folio"
+    assert "campaign keeps the party" in subtitle.lower()
+
+
+def test_returning_startup_prioritizes_resume_and_hides_empty_prepared_action():
+    from app import BattleApp
+
+    data = campaign_store.normalize_book({
+        "active": "Lost Mine",
+        "campaigns": {
+            "Lost Mine": {"party": [{"name": "Borin"}], "ruleset": "2024"},
+        },
+    })
+    current = {
+        "id": "abc",
+        "name": "Cragmaw Hideout",
+        "campaign": "Lost Mine",
+        "snapshot": {"round": 3, "combatants": [{}, {}]},
+    }
+    app = BattleApp()
+    with mock.patch.object(app, "_encounter_records", return_value=[current]):
+        options, prompt, subtitle = app._startup_menu(data, current, 0)
+    keys = [key for key, _label in options]
+    assert keys[0] == "resume"
+    assert "open:Lost Mine" in keys
+    assert "prepared" not in keys and "campaigns" not in keys
+    assert prompt == "Choose tonight's starting point"
+    assert "1 adventurer" in subtitle
+
+
+def test_manual_campaign_member_builds_a_fresh_default_pc():
+    from app import BattleApp
+
+    pc = BattleApp()._manual_pc("Borin")
+    assert (pc.name, pc.kind, pc.hp, pc.max_hp, pc.ac, pc.ddb_id) == ("Borin", "PC", 10, 10, 10, None)
+
+
+def test_campaign_created_from_table_keeps_imported_and_manual_party_members():
+    from app import BattleApp
+
+    refs = BattleApp._party_refs_from_combatants([
+        Combatant("Lyra", "PC", hp=20, max_hp=20, ac=15, ddb_id=123),
+        Combatant("Borin", "PC", hp=10, max_hp=10, ac=10),
+        Combatant("Goblin", "monster", hp=7, max_hp=7, ac=15),
+    ])
+    assert refs == [{"name": "Lyra", "ddb_id": 123}, {"name": "Borin"}]
+
+
 def test_live_encounter_is_remembered_with_campaign_context():
     import app as appmod
     from app import BattleApp
@@ -871,16 +969,92 @@ def test_live_encounter_is_remembered_with_campaign_context():
     app = BattleApp()
     app._session_started = True
     app._session_campaign = "Lost Mine"
+    app._session_encounter_name = "Goblin Cave"
     app.combatants = [Combatant("Goblin", "monster", hp=7, max_hp=7, ac=15)]
     with tempfile.TemporaryDirectory() as tmp:
-        path = os.path.join(tmp, "current-encounter.json")
-        with mock.patch.object(appmod, "SAVE_PATH", path):
+        path = os.path.join(tmp, "campaign-encounters.json")
+        legacy_path = os.path.join(tmp, "missing-legacy.json")
+        with mock.patch.object(appmod, "CAMPAIGN_ENCOUNTERS_PATH", path), mock.patch.object(appmod, "SAVE_PATH", legacy_path):
             assert app._remember_current_encounter()
             remembered = app._current_encounter_read()
+            store = encounter_store.read_store(path)
     assert remembered is not None
-    assert remembered["version"] == 2
+    assert remembered["version"] == 3
     assert remembered["campaign"] == "Lost Mine"
+    assert remembered["encounter_name"] == "Goblin Cave"
     assert remembered["combatants"][0]["name"] == "Goblin"
+    assert len(store["encounters"]) == 1
+
+
+def test_encounter_store_keeps_many_fights_per_campaign_and_one_current():
+    data = encounter_store.empty_store()
+    records = []
+    for i in range(10):
+        records.append(encounter_store.create_record(
+            data,
+            "Lost Mine",
+            f"Encounter {i + 1}",
+            {"combatants": [], "round": i + 1},
+        ))
+    assert len(data["encounters"]) == 10
+    assert encounter_store.current_for(data, "Lost Mine")["name"] == "Encounter 10"
+    assert sum(record["status"] == "active" for record in records) == 1
+    assert all(record["status"] == "paused" for record in records[:-1])
+    ordered = encounter_store.records_for(data, "Lost Mine")
+    assert ordered[0]["name"] == "Encounter 10"
+
+
+def test_encounter_store_tracks_current_fight_per_campaign():
+    data = encounter_store.empty_store()
+    lost = encounter_store.create_record(data, "Lost Mine", "Cragmaw", {"combatants": [], "round": 2})
+    curse = encounter_store.create_record(data, "Curse of Strahd", "Death House", {"combatants": [], "round": 1})
+    assert encounter_store.current_for(data, "Lost Mine")["id"] == lost["id"]
+    assert encounter_store.current_for(data, "Curse of Strahd")["id"] == curse["id"]
+    assert lost["status"] == "active" and curse["status"] == "active"
+
+
+def test_completed_encounter_stays_archived_and_can_be_reactivated():
+    data = encounter_store.empty_store()
+    record = encounter_store.create_record(data, "Lost Mine", "Goblin Ambush", {"combatants": [], "round": 4})
+    assert encounter_store.complete_record(data, record["id"])
+    assert record["status"] == "complete"
+    assert encounter_store.current_for(data, "Lost Mine") is None
+    encounter_store.activate_record(data, record["id"])
+    assert record["status"] == "active"
+
+
+def test_encounter_can_be_renamed_and_moved_into_a_campaign():
+    data = encounter_store.empty_store()
+    record = encounter_store.create_record(data, None, "Loose Fight", {"combatants": [], "round": 1})
+    assert encounter_store.rename_record(data, record["id"], "Session Zero")
+    assert encounter_store.move_record(data, record["id"], "Lost Mine")
+    assert record["name"] == "Session Zero"
+    assert record["campaign"] == "Lost Mine"
+    assert encounter_store.current_for(data, None) is None
+    assert encounter_store.current_for(data, "Lost Mine")["id"] == record["id"]
+
+
+def test_legacy_resume_point_migrates_into_encounter_store():
+    import app as appmod
+    from app import BattleApp
+
+    legacy = {
+        "version": 2,
+        "campaign": "Lost Mine",
+        "combatants": [{"name": "Goblin", "kind": "monster", "hp": 7, "max_hp": 7, "ac": 15}],
+        "round": 3,
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        legacy_path = os.path.join(tmp, "encounter.json")
+        store_path = os.path.join(tmp, "campaign-encounters.json")
+        with open(legacy_path, "w", encoding="utf-8") as legacy_file:
+            json.dump(legacy, legacy_file)
+        with mock.patch.object(appmod, "SAVE_PATH", legacy_path), mock.patch.object(appmod, "CAMPAIGN_ENCOUNTERS_PATH", store_path):
+            record = BattleApp()._last_encounter_record()
+    assert record is not None
+    assert record["name"] == "Recovered encounter"
+    assert record["campaign"] == "Lost Mine"
+    assert record["snapshot"]["round"] == 3
 
 
 def main() -> None:

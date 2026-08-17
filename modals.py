@@ -46,13 +46,15 @@ class NumberModal(ModalScreen[int]):
 class ListModal(ModalScreen[str]):
     BINDINGS = [("escape", "cancel", "Cancel")]
 
-    def __init__(self, title: str, options: list[tuple[str, str]]) -> None:
+    def __init__(self, title: str, options: list[tuple[str, str]], *, wide: bool = False) -> None:
         super().__init__()
         self._title = title
         self._options = options
+        self._wide = wide
 
     def compose(self) -> ComposeResult:
-        with Container(classes="modal-box"):
+        classes = "modal-box wide-modal" if self._wide else "modal-box"
+        with Container(classes=classes):
             yield Static(f"[bold #e6ebf2]{self._title}[/]", classes="modal-title")
             yield ListView(
                 *[ListItem(Label(label, classes="modal-item")) for _, label in self._options],
@@ -117,7 +119,7 @@ class StartModal(ModalScreen[str]):
 
     def compose(self) -> ComposeResult:
         with Container(classes="modal-box startup-box"):
-            yield Static("[bold #a8d0ff]⚔  DMTUI[/]  [#8a93a3]SESSION START[/]", classes="modal-title")
+            yield Static("[bold #a8d0ff]⚔  WARD[/]  [#8a93a3]DM'S FOLIO[/]", classes="modal-title")
             yield Static(
                 f"[bold #e6ebf2]{self._prompt}[/]\n[dim]{self._subtitle}[/]"
             )
@@ -125,7 +127,7 @@ class StartModal(ModalScreen[str]):
                 *[ListItem(Label(label, classes="modal-item")) for _, label in self._options],
                 id="modal-list",
             )
-            yield Static("[dim][bold]Enter[/] start · [bold]Esc[/] quit[/]", classes="modal-hint")
+            yield Static("[dim][bold]Enter[/] — start   ·   [bold]Esc[/] — quit[/]", classes="modal-hint")
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         index = event.list_view.index
@@ -137,19 +139,32 @@ class StartModal(ModalScreen[str]):
 
 
 class PartyImportModal(ModalScreen[str | None]):
-    """Edit a campaign's party from D&D Beyond character links."""
+    """Edit a campaign roster using D&D Beyond references or plain names."""
 
     BINDINGS = [("escape", "cancel", "Cancel")]
 
+    def __init__(self, campaign_name: str = "", initial: str = "", first_run: bool = False) -> None:
+        super().__init__()
+        self._campaign_name = campaign_name
+        self._initial = initial
+        self._first_run = first_run
+
     def compose(self) -> ComposeResult:
+        title = "ADD YOUR PARTY" if self._first_run else "EDIT PARTY"
+        if self._campaign_name:
+            title += f" · {escape(self._campaign_name)}"
         with Container(classes="modal-box party-import-box"):
-            yield Static("[bold #e6ebf2]EDIT PARTY[/]", classes="modal-title")
-            yield Static("[dim]Paste one D&D Beyond character link per line. Character IDs also work.[/]")
-            yield TextArea(id="party-import-input", placeholder="https://www.dndbeyond.com/characters/12345678\nhttps://www.dndbeyond.com/characters/87654321")
+            yield Static(f"[bold #e6ebf2]{title}[/]", classes="modal-title")
+            yield Static("[dim]One adventurer per line · D&D Beyond link, character ID, or name.[/]")
+            yield TextArea(
+                self._initial,
+                id="party-import-input",
+                placeholder="https://www.dndbeyond.com/characters/12345678\nMara Stonehand\nTovin Reed",
+            )
             with Horizontal(classes="modal-buttons"):
-                yield Button("Import", variant="primary", id="import")
+                yield Button("Review party", variant="primary", id="import")
                 yield Button("Cancel", id="cancel")
-            yield Static("[dim][bold]Tab[/] moves to Import · [bold]Esc[/] back[/]", classes="modal-hint")
+            yield Static("[dim][bold]Tab[/] moves to Review party · [bold]Esc[/] back[/]", classes="modal-hint")
 
     def on_mount(self) -> None:
         self.query_one("#party-import-input", TextArea).focus()
@@ -555,8 +570,8 @@ class HelpModal(ModalScreen[None]):
                 "  [bold]c[/] condition   [bold]shift+c[/] campaign   [bold]m[/] quick monster   [bold]x[/] remove\n"
                 "  [bold]ctrl+m[/]/[bold]b[/]/[bold]shift+m[/] monster library (SRD)   [bold]v[/] spellbook   [bold]r[/] roll init   [bold]shift+r[/] reset\n"
                 "  [bold]t[/] type initiative inline\n"
-                "  [bold]i[/] import PC   [bold]f[/] find   [bold]e[/] edit   [bold]shift+e[/] AI encounter   [bold]p[/] add PC   [bold]ctrl+n[/] new encounter\n"
-                "  [bold]ctrl+e[/] prepared encounters   [bold]shift+c[/] campaign, party, and notes\n"
+                "  [bold]i[/] import PC   [bold]f[/] find   [bold]e[/] edit   [bold]shift+e[/] AI encounter   [bold]p[/] add PC   [bold]ctrl+n[/] another encounter\n"
+                "  [bold]ctrl+e[/] prepared encounters   [bold]shift+c[/] campaign home + saved encounters\n"
                 "  [bold]s[/] cycle views   [bold]ctrl+1/2/3[/] choose view   live encounter remembered automatically\n"
                 "  [bold]u[/]/[bold]shift+u[/] undo/redo   [bold]/[/] chat or [bold]/roll 2d6+4[/]   [bold]?[/] help\n"
                 "  [bold]q[/] quit   [bold]Esc[/] drop token / cancel\n\n"

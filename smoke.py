@@ -76,6 +76,14 @@ CANNED = {
 ddb.fetch_character_data = lambda cid: CANNED[cid]
 
 
+async def _inline_integration(func, *args):
+    """Keep the offline UI drive deterministic and executor-free."""
+    return func(*args)
+
+
+appmod.run_in_thread = _inline_integration
+
+
 class _Seq:
     """Canned RNG stub for smoke: yields fixed values from randint."""
 
@@ -114,29 +122,33 @@ async def main() -> None:
     appmod.CAMPAIGN_PATH = os.path.join(SHOTS, "campaigns-test.json")
     appmod.SAVE_PATH = os.path.join(SHOTS, "encounter-test.json")
     appmod.ENCOUNTER_PATH = os.path.join(SHOTS, "encounters-test.json")
-    for p in (appmod.CAMPAIGN_PATH, appmod.SAVE_PATH, appmod.ENCOUNTER_PATH):
+    appmod.CAMPAIGN_ENCOUNTERS_PATH = os.path.join(SHOTS, "campaign-encounters-test.json")
+    for p in (appmod.CAMPAIGN_PATH, appmod.SAVE_PATH, appmod.ENCOUNTER_PATH, appmod.CAMPAIGN_ENCOUNTERS_PATH):
         if os.path.exists(p):
             os.remove(p)
-    with open(appmod.CAMPAIGN_PATH, "w", encoding="utf-8") as f:
-        json.dump({
-            "active": "My Campaign",
-            "campaigns": {"My Campaign": {"character_ids": [], "ruleset": "2014"}},
-        }, f)
-
     app = BattleApp()
     async with app.run_test(size=(130, 50)) as pilot:
         await _wait_modal(pilot, StartModal)
         app.save_screenshot(os.path.join(SHOTS, "00-start-menu.png"))
         await pilot.press("enter")
+        await _wait_modal(pilot, TextModal)
+        app.screen.query_one(Input).value = "My Campaign"
+        await pilot.press("enter")
+        await _wait_modal(pilot, ListModal)
+        await pilot.press("down", "enter")  # 2014 rules
+        await _wait_modal(pilot, ListModal)
+        await pilot.press("enter")  # add the party now
         await _wait_modal(pilot, PartyImportModal)
         pilot.app.screen.query_one(TextArea).load_text(
             "https://www.dndbeyond.com/characters/91566422\n"
             "https://www.dndbeyond.com/characters/112516506\n"
-            "https://www.dndbeyond.com/characters/90060446\n"
-            "not-a-character"
+            "https://www.dndbeyond.com/characters/90060446"
         )
         await pilot.press("tab", "enter")
         await _wait_modal(pilot, PartyPreviewModal)
+        await pilot.press("enter")
+        await _wait_modal(pilot, TextModal)
+        app.screen.query_one(Input).value = "Roadside Trouble"
         await pilot.press("enter")
         await _wait_pcs(pilot, 3)
         await pilot.pause()
@@ -456,15 +468,18 @@ async def main() -> None:
 
         # The live encounter is remembered automatically after every change.
         hp0 = zephyr.hp
-        assert os.path.exists(appmod.SAVE_PATH)
+        assert os.path.exists(appmod.CAMPAIGN_ENCOUNTERS_PATH)
         await pilot.press("d", "5", "enter")
         await pilot.pause()
         assert zephyr.hp == hp0 - 5, zephyr.hp
-        with open(appmod.SAVE_PATH) as f:
-            remembered = json.load(f)
+        with open(appmod.CAMPAIGN_ENCOUNTERS_PATH) as f:
+            encounter_book = json.load(f)
+        remembered_record = encounter_book["encounters"][encounter_book["last_active"]]
+        remembered = remembered_record["snapshot"]
         zephyr_remembered = next(c for c in remembered["combatants"] if c["name"] == "Zephyr")
         assert zephyr_remembered["hp"] == hp0 - 5, zephyr_remembered
         assert remembered["campaign"] == "My Campaign"
+        assert remembered_record["name"] == "Roadside Trouble"
         app.save_screenshot(os.path.join(SHOTS, "25-save-load.png"))
         zephyr = [c for c in app.combatants if c.name == "Zephyr"][0]
         lyra = [c for c in app.combatants if c.name == "Lyra"][0]
@@ -594,15 +609,16 @@ async def main() -> None:
         await _wait_modal(pilot, ListModal)
         await pilot.press("enter")
         await pilot.pause()
-        selected_after_template = next(c for c in app.combatants if c.name == selected_name)
-        assert selected_after_template.hp < selected_after_template.max_hp
+        assert app._session_encounter_name == "Roadside Ambush"
+        assert selected_name not in {c.name for c in app.combatants}
+        assert {c.name for c in app.combatants if c.kind == "PC"} == {"Zephyr", "Lyra", "Tess"}
         assert all(c.init is None and not c.conditions for c in app.combatants)
-        assert all(c.hp == c.max_hp for c in app.combatants if c.kind != "PC")
+        assert all(c.hp == c.max_hp for c in app.combatants)
 
         # Campaign menu -> scratchpad stores multiline notes in campaigns.json.
         await pilot.press("C")
         await _wait_modal(pilot, ListModal)
-        await pilot.press("down", "down", "enter")
+        await pilot.press(*(["down"] * 6), "enter")
         await pilot.pause()
         note = app.screen.query_one(TextArea)
         note.load_text("Guard = Harlan\nDoor code 417")
@@ -613,17 +629,28 @@ async def main() -> None:
         assert campaigns["campaigns"][campaigns["active"]]["notes"] == "Guard = Harlan\nDoor code 417"
         await pilot.press("C")
         await _wait_modal(pilot, ListModal)
-        await pilot.press("down", "down", "enter")
+        await pilot.press(*(["down"] * 6), "enter")
         await pilot.pause()
         assert app.screen.query_one(TextArea).text == "Guard = Harlan\nDoor code 417"
         await pilot.press("escape")
         await pilot.pause()
 
+        # Ruleset is campaign-owned and editable without rewriting the live fight.
+        await pilot.press("C")
+        await _wait_modal(pilot, ListModal)
+        await pilot.press(*(["down"] * 5), "enter")
+        await _wait_modal(pilot, ListModal)
+        await pilot.press("enter")  # 2024 rules
+        await pilot.pause()
+        with open(appmod.CAMPAIGN_PATH) as f:
+            campaigns = json.load(f)
+        assert campaigns["campaigns"]["My Campaign"]["ruleset"] == "2024"
+
         # Create a campaign from the current party, then switch into it.
         await pilot.press("C")
         await _wait_modal(pilot, ListModal)
         app.save_screenshot(os.path.join(SHOTS, "31-campaign-menu.png"))
-        await pilot.press("down", "down", "down")  # -> Create a campaign from this party
+        await pilot.press(*(["down"] * 8))  # -> Create a campaign from this party
         await pilot.press("enter")
         await _wait_modal(pilot, TextModal)
         app.screen.query_one(Input).value = "Test Campaign"
@@ -632,17 +659,20 @@ async def main() -> None:
         with open(appmod.CAMPAIGN_PATH) as f:
             camps = json.load(f)
         assert camps["active"] == "Test Campaign", camps["active"]
-        assert len(camps["campaigns"]["Test Campaign"]["character_ids"]) == 4
-        assert set(camps["campaigns"]["Test Campaign"]["character_ids"]) == set(DEFAULT_IDS + [9876543])
+        saved_party = camps["campaigns"]["Test Campaign"]["party"]
+        assert len(saved_party) == 3, saved_party
+        assert {member.get("ddb_id") for member in saved_party if member.get("ddb_id")} == set(DEFAULT_IDS)
 
-        # Starting a new encounter in the campaign reloads only its remembered
-        # D&D Beyond roster; the manually added Borin is not part of that party.
-        await pilot.press("C")
+        # Creating the campaign keeps the current prepared fight and opens its
+        # campaign home. Starting another encounter preserves that fight as paused.
         await _wait_modal(pilot, ListModal)
-        await pilot.press("down", "down", "down", "down", "enter")
-        await _wait_pcs(pilot, 4)
+        await pilot.press("down", "down", "enter")
+        await _wait_modal(pilot, TextModal)
+        app.screen.query_one(Input).value = "Redbrand Cellar"
+        await pilot.press("enter")
+        await _wait_pcs(pilot, 3)
         loaded_party = [c.name for c in app.combatants if c.kind == "PC"]
-        assert set(loaded_party) == {"Lyra", "Zephyr", "Tess", "Nix"}, loaded_party
+        assert set(loaded_party) == {"Lyra", "Zephyr", "Tess"}, loaded_party
         app.save_screenshot(os.path.join(SHOTS, "32-campaign-loaded.png"))
 
         # with everyone dead, advancing must still begin a new round — the
@@ -663,18 +693,54 @@ async def main() -> None:
         await pilot.pause()
         app.save_screenshot(os.path.join(SHOTS, "29-new-encounter.png"))
         await pilot.press("enter")
-        await _wait_pcs(pilot, 4)
-        assert len(app.combatants) == 4, len(app.combatants)
+        await _wait_modal(pilot, TextModal)
+        app.screen.query_one(Input).value = "Cragmaw Approach"
+        await pilot.press("enter")
+        await _wait_pcs(pilot, 3)
+        assert len(app.combatants) == 3, len(app.combatants)
         assert app.round == 1
         assert all(c.hp == c.max_hp for c in app.combatants)
         await pilot.press("u")
         await pilot.pause()
-        assert len(app.combatants) == 4, len(app.combatants)
+        assert len(app.combatants) == 3, len(app.combatants)
         assert all(c.hp == 0 for c in app.combatants)
         await pilot.press("U")
         await pilot.pause()
-        assert len(app.combatants) == 4, len(app.combatants)
+        assert len(app.combatants) == 3, len(app.combatants)
         assert all(c.hp == c.max_hp for c in app.combatants)
+
+        # The campaign now has three independent encounters. Browsing the index
+        # does not replace the current fight until an encounter is resumed.
+        with open(appmod.CAMPAIGN_ENCOUNTERS_PATH) as f:
+            encounter_book = json.load(f)
+        campaign_records = [
+            record for record in encounter_book["encounters"].values()
+            if record["campaign"] == "Test Campaign"
+        ]
+        assert {record["name"] for record in campaign_records} == {
+            "Roadside Ambush", "Redbrand Cellar", "Cragmaw Approach"
+        }
+        assert sum(record["status"] == "active" for record in campaign_records) == 1
+        current_id = app._session_encounter_id
+        await pilot.press("C")
+        await _wait_modal(pilot, ListModal)
+        await pilot.press("down", "enter")  # encounter index
+        await _wait_modal(pilot, ListModal)
+        app.save_screenshot(os.path.join(SHOTS, "34-encounter-index.png"))
+        assert app._session_encounter_id == current_id
+        expected_paused = app._encounter_records("Test Campaign")[1]
+        await pilot.press("down", "enter")
+        await _wait_modal(pilot, ListModal)  # selected encounter actions
+        await pilot.press("enter")  # resume
+        await pilot.pause()
+        assert app._session_encounter_id == expected_paused["id"]
+        assert app._session_encounter_name == expected_paused["name"]
+        await pilot.press("u")
+        await pilot.pause()
+        assert app._session_encounter_id == current_id
+        await pilot.press("U")
+        await pilot.pause()
+        assert app._session_encounter_id == expected_paused["id"]
 
         # Campaign-free play is a genuinely empty remembered battlefield.
         app._start_blank_encounter()
