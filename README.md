@@ -41,11 +41,12 @@ or `"ruleset": "2024"`. The active ruleset is included in DM chat context.
 
 ### DM Screen mode
 
-Press `Ctrl+2` to replace the
-four encounter panels with a fixed, glanceable 5e reference: combat quick
-rules, conditions, quick numbers, and DC/roll guidance. Press `Ctrl+1` to return to the
-encounter, or `s` to switch between both modes. Bare `Tab` and function keys are
-left to normal terminal/desktop behavior. The reference is intentionally
+Press `Ctrl+2` to replace the four encounter panels with a fixed, glanceable
+5e reference: combat quick rules, conditions, quick numbers, and DC/roll
+guidance. Press `Ctrl+3` for Party Reference: current HP, AC, passive checks,
+saves, spell DCs, and PC conditions/reminders. Press `Ctrl+1` to return to the
+encounter, or `s` to cycle through all three modes. Bare `Tab` and function keys
+are left to normal terminal/desktop behavior. The references are intentionally
 read-only; the physical table remains authoritative.
 
 ### D&D Beyond imports
@@ -62,7 +63,7 @@ current creatures and positions as a prepared starting state: HP is restored,
 conditions are cleared, and initiative is left unrolled. Loading a template is
 undoable.
 
-Press `C` and choose **Edit campaign scratchpad** to keep multiline notes with
+Press `Shift+c` and choose **Edit campaign scratchpad** to keep multiline notes with
 the active campaign—NPC names, clues, loot, passwords, or anything else useful
 between sessions. `Ctrl+Enter` saves the scratchpad; `Esc` cancels.
 
@@ -73,11 +74,12 @@ between sessions. `Ctrl+Enter` saves the scratchpad; `Esc` cancels.
 | `↑`/`↓` or `k`/`j` | select previous/next creature |
 | `←`/`→` | −1/+1 HP |
 | `g` | grab a token (arrows place it, `g`/`Esc` drops) |
-| `n` / `Enter` | next turn |
-| `a` | attack with the selected creature (weapon/spell, then target) |
+| `n` | next turn |
+| `Enter` / `a` | attack with the selected creature |
 | `d` / `h` | damage / heal (amount prompt) |
+| `0`–`9` / `Backspace` | type or edit an inline damage/healing amount |
 | `c` | toggle a condition |
-| `m` / `Ctrl+m` | add a monster / browse the searchable monster library |
+| `m` / `Ctrl+m` / `b` / `Shift+m` | quick add / browse the searchable monster library |
 | `v` | spellbook — browse the SRD and add a spell to the selected creature |
 | `x` | remove the selected creature (asks first) |
 | `r` / `t` | roll monster initiative / set a creature's initiative |
@@ -89,14 +91,14 @@ between sessions. `Ctrl+Enter` saves the scratchpad; `Esc` cancels.
 | `e` | edit the selected creature (name, HP, AC, init mod, role, note, scores) |
 | `f` | find a creature by name or map coordinate (`@B3`, `@AA1`) |
 | `u` / `Shift+u` | undo / redo |
-| `s` | switch between combat and DM Screen |
+| `s` | cycle Combat → DM Screen → Party Reference |
+| `Ctrl+1` / `Ctrl+2` / `Ctrl+3` | open Combat / DM Screen / Party Reference |
+| `Shift+c` | open campaigns; choose **Edit campaign scratchpad** for notes |
 | `Ctrl+s` / `Ctrl+l` | save / load the encounter to `encounter.json` |
 | `Ctrl+n` | new blank encounter |
 | `Ctrl+e` | save/load named encounter templates |
-| `Ctrl+p` | command palette |
 | `/` | ask the OpenAI DM assistant |
 | `/roll 2d6+4` | roll dice locally without using OpenAI |
-| `Ctrl+1` / `Ctrl+2` | combat view / fixed DM quick-reference screen |
 | `q` / `?` | quit / help |
 
 ## Attacks & spells

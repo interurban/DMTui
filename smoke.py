@@ -135,8 +135,8 @@ async def main() -> None:
         assert "Fire Bolt" in zephyr.spells and "Shield" in zephyr.spells
         app.save_screenshot(os.path.join(SHOTS, "01-start.png"))
 
-        # Ctrl+2 swaps the four live panels for a read-only DM reference, and Ctrl+1
-        # returns without changing encounter state.
+        # Ctrl+2/3 open read-only references, and s cycles all three modes without
+        # changing encounter state.
         hp_before_screen = zephyr.hp
         await pilot.press("ctrl+2")
         await pilot.pause()
@@ -148,10 +148,17 @@ async def main() -> None:
         app.save_screenshot(os.path.join(SHOTS, "33-dm-screen.png"))
         await pilot.press("s")
         await pilot.pause()
-        assert "BATTLE LOG" in str(app.query_one("#log-title", Static).content)
+        assert "PARTY REFERENCE" in str(app.query_one("#map-title", Static).content)
+        assert "PASSIVE CHECKS" in str(app.query_one("#init-title", Static).content)
+        assert "SAVES / SPELL DC" in str(app.query_one("#detail-title", Static).content)
+        assert "CONDITIONS / REMINDERS" in str(app.query_one("#log-title", Static).content)
+        assert "Zephyr" in str(app.query_one("#map", MapGrid).content)
+        await pilot.press("ctrl+3")
+        await pilot.pause()
+        assert "PARTY REFERENCE" in str(app.query_one("#map-title", Static).content)
         await pilot.press("s")
         await pilot.pause()
-        assert "COMBAT QUICK RULES" in str(app.query_one("#map-title", Static).content)
+        assert "BATTLE LOG" in str(app.query_one("#log-title", Static).content)
         await pilot.press("ctrl+1")
         await pilot.pause()
         assert "BATTLE LOG" in str(app.query_one("#log-title", Static).content)
@@ -552,7 +559,7 @@ async def main() -> None:
         assert all(c.hp == c.max_hp and c.init is None and not c.conditions for c in app.combatants)
 
         # Campaign menu -> scratchpad stores multiline notes in campaigns.json.
-        await pilot.press("C")
+        await pilot.press("shift+c")
         await _wait_modal(pilot, ListModal)
         await pilot.press("down", "down", "enter")
         await pilot.pause()
@@ -563,9 +570,16 @@ async def main() -> None:
         with open(appmod.CAMPAIGN_PATH) as f:
             campaigns = json.load(f)
         assert campaigns["campaigns"][campaigns["active"]]["notes"] == "Guard = Harlan\nDoor code 417"
+        await pilot.press("shift+c")
+        await _wait_modal(pilot, ListModal)
+        await pilot.press("down", "down", "enter")
+        await pilot.pause()
+        assert app.screen.query_one(TextArea).text == "Guard = Harlan\nDoor code 417"
+        await pilot.press("escape")
+        await pilot.pause()
 
-        # campaigns: save the current party as a new campaign (C), then load it
-        await pilot.press("C")
+        # campaigns: save the current party as a new campaign, then load it
+        await pilot.press("shift+c")
         await _wait_modal(pilot, ListModal)
         app.save_screenshot(os.path.join(SHOTS, "31-campaign-menu.png"))
         await pilot.press("down")       # -> "Save current party as a new campaign"
@@ -581,7 +595,7 @@ async def main() -> None:
         assert set(camps["campaigns"]["Test Party"]["character_ids"]) == set(DEFAULT_IDS + [9876543])
 
         # load the saved campaign back (active campaign is the first menu option)
-        await pilot.press("C")
+        await pilot.press("shift+c")
         await _wait_modal(pilot, ListModal)
         await pilot.press("enter")      # -> load: Test Party
         await _wait_pcs(pilot, 4)

@@ -198,6 +198,7 @@ class BattleApp(App[None]):
     BINDINGS = [
         Binding("ctrl+1", "combat_view", "Combat"),
         Binding("ctrl+2", "dm_screen", "DM Screen"),
+        Binding("ctrl+3", "party_view", "Party Reference"),
         Binding("up, k", "arrow_up", "Select"),
         Binding("down, j", "arrow_down", "Select"),
         Binding("left", "arrow_left", "-HP"),
@@ -225,7 +226,7 @@ class BattleApp(App[None]):
         Binding("9", "hp_digit(9)", "9"),
         Binding("backspace", "hp_backspace", "Backspace"),
         Binding("c", "condition", "Condition"),
-        Binding("C", "campaign", "Campaign"),
+        Binding("shift+c", "campaign", "Campaign menu"),
         Binding("ctrl+e", "encounter_templates", "Encounter templates"),
         Binding("m", "monster", "Quick monster"),
         Binding("ctrl+m", "browse", "Monster library"),
@@ -245,7 +246,6 @@ class BattleApp(App[None]):
         Binding("s", "toggle_view", "Switch view"),
         Binding("ctrl+s", "save", "Save"),
         Binding("ctrl+l", "load", "Load"),
-        Binding("ctrl+p", "command_palette", "Palette"),
         Binding("q", "quit", "Quit"),
         Binding("slash", "chat", "Chat"),
     ]
@@ -278,8 +278,8 @@ class BattleApp(App[None]):
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         """Keep the reference screen glanceable and mutation-free."""
-        if self.view_mode == "dm_screen" and action not in {
-            "combat_view", "dm_screen", "toggle_view", "chat", "help", "quit", "release",
+        if self.view_mode in {"dm_screen", "party"} and action not in {
+            "combat_view", "dm_screen", "party_view", "toggle_view", "chat", "help", "quit", "release",
         }:
             return False
         return True
@@ -357,12 +357,12 @@ class BattleApp(App[None]):
         hints.display = not self._chat_mode
         chat_input.display = self._chat_mode
         if not self._chat_mode:
-            if self.view_mode == "dm_screen":
-                hints.update("  ·  ".join([hint("s", "switch"), hint("ctrl+1", "combat"), hint("ctrl+2", "DM screen"), hint("/", "lookup"), hint("?", "help"), hint("q", "quit")]))
+            if self.view_mode != "combat":
+                hints.update("  ·  ".join([hint("s", "switch"), hint("ctrl+1", "combat"), hint("ctrl+2", "DM screen"), hint("ctrl+3", "party"), hint("/", "lookup"), hint("?", "help"), hint("q", "quit")]))
             else:
                 hints.update(
                     "  ·  ".join(
-                    [hint("s", "switch"), hint("i", "import"), hint("f", "find"), hint("ctrl+p", "palette"), hint("/", "chat"), hint("?", "help"), hint("q", "quit")]
+                    [hint("s", "switch"), hint("i", "import"), hint("f", "find"), hint("shift+c", "campaigns"), hint("/", "chat"), hint("?", "help"), hint("q", "quit")]
                     )
                 )
         elif self._chat_busy:
@@ -392,11 +392,21 @@ class BattleApp(App[None]):
         self.view_mode = "dm_screen"
         self._refresh_all()
 
+    def action_party_view(self) -> None:
+        self._initiative_pass = False
+        self._init_entry = None
+        self._hp_entry = None
+        self.view_mode = "party"
+        self._refresh_all()
+
     def action_toggle_view(self) -> None:
-        if self.view_mode == "dm_screen":
+        next_mode = {"combat": "dm_screen", "dm_screen": "party", "party": "combat"}[self.view_mode]
+        if next_mode == "combat":
             self.action_combat_view()
-        else:
+        elif next_mode == "dm_screen":
             self.action_dm_screen()
+        else:
+            self.action_party_view()
 
     def _exit_chat_mode(self) -> None:
         if self._chat_timer is not None:
@@ -762,7 +772,8 @@ class BattleApp(App[None]):
             "role": c.role, "note": c.note, "x": c.x, "y": c.y,
             "stats": dict(c.stats), "saves": sorted(c.saves), "speed": c.speed,
             "proficiency": c.proficiency, "hit_dice": c.hit_dice, "skills": dict(c.skills),
-            "passive_perception": c.passive_perception, "attacks": list(c.attacks),
+            "passive_perception": c.passive_perception, "spell_dc": c.spell_dc,
+            "attacks": list(c.attacks),
             "traits": list(c.traits), "spells": list(c.spells), "ddb_id": c.ddb_id,
             "reminder": c.reminder,
         }
@@ -822,7 +833,7 @@ class BattleApp(App[None]):
             self._moving = bool(snap.get("moving", False))
         else:
             self.round = round_val
-            self.view_mode = snap.get("view_mode", "combat") if snap.get("view_mode") in {"combat", "dm_screen"} else "combat"
+            self.view_mode = snap.get("view_mode", "combat") if snap.get("view_mode") in {"combat", "dm_screen", "party"} else "combat"
             self._turn = (
                 new_combatants[turn_i]
                 if n and isinstance(turn_i, int) and 0 <= turn_i < n
@@ -905,12 +916,16 @@ class BattleApp(App[None]):
 
     def _refresh_rows(self) -> None:
         self.query_one("#init-title", Static).update(
-            "INITIATIVE ORDER" if self.view_mode == "combat" else "CONDITIONS"
+            "INITIATIVE ORDER" if self.view_mode == "combat" else (
+                "PASSIVE CHECKS" if self.view_mode == "party" else "CONDITIONS"
+            )
         )
         reference = self.query_one("#init-reference", Static)
-        reference.display = self.view_mode == "dm_screen"
+        reference.display = self.view_mode != "combat"
         if self.view_mode == "dm_screen":
             reference.update(panel_text("conditions"))
+        elif self.view_mode == "party":
+            reference.update(self._party_passives_markup())
         for row in self._rows.values():
             row.display = self.view_mode == "combat"
             row.current = row.combatant is self._turn
@@ -937,7 +952,10 @@ class BattleApp(App[None]):
         turn = self._turn
         self.sub_title = (
             f"Round {self.round} · {turn.name if turn else '—'} to act"
-            if self.view_mode == "combat" else "DM Screen · quick reference"
+            if self.view_mode == "combat" else (
+                "DM Screen · quick reference" if self.view_mode == "dm_screen"
+                else "Party Reference · secret checks"
+            )
         )
 
     def _refresh_map(self) -> None:
@@ -946,7 +964,12 @@ class BattleApp(App[None]):
         if self.view_mode == "dm_screen":
             grid.update(panel_text("combat"))
             self.query_one("#map-title", Static).update("COMBAT QUICK RULES")
-            self.query_one("#map-status", Static).update("s switch  ·  Ctrl+1 combat  ·  Ctrl+2 DM Screen  ·  / lookup  ·  ? help")
+            self.query_one("#map-status", Static).update("s switch  ·  Ctrl+1 combat  ·  Ctrl+2 DM Screen  ·  Ctrl+3 party  ·  / lookup")
+            return
+        if self.view_mode == "party":
+            grid.update(self._party_overview_markup())
+            self.query_one("#map-title", Static).update("PARTY REFERENCE")
+            self.query_one("#map-status", Static).update("Current HP · AC · passive Perception · speed")
             return
         avail_w = max(1, grid.size.width - LEFT_W)
         cell_w = 4 if avail_w >= 20 else 3
@@ -962,12 +985,72 @@ class BattleApp(App[None]):
     def _refresh_detail(self) -> None:
         detail = self.query_one("#detail", Static)
         self.query_one("#detail-title", Static).update(
-            "COMBATANT" if self.view_mode == "combat" else "DCs / ROLLS"
+            "COMBATANT" if self.view_mode == "combat" else (
+                "SAVES / SPELL DC" if self.view_mode == "party" else "DCs / ROLLS"
+            )
         )
         if self.view_mode == "dm_screen":
             detail.update(panel_text("rolls"))
             return
+        if self.view_mode == "party":
+            detail.update(self._party_saves_markup())
+            return
         detail.update(self._detail_markup())
+
+    def _party_members(self) -> list[Combatant]:
+        return [c for c in self.combatants if c.kind == "PC"]
+
+    @staticmethod
+    def _passive_skill(c: Combatant, skill: str, ability: int) -> int:
+        bonus = c.skills.get(skill)
+        if bonus is None:
+            bonus = c.mod(ability) or 0
+        return 10 + bonus
+
+    def _party_overview_markup(self) -> str:
+        members = self._party_members()
+        if not members:
+            return "[dim]No PCs in this encounter.[/]"
+        lines = ["[bold #a8d0ff]NAME             HP          AC   PP   SPD[/]"]
+        for c in members:
+            hp_color = "#3fae6a" if c.hp_frac > 0.5 else ("#d9a441" if c.alive else "#d95841")
+            hp = f"{c.hp}/{c.max_hp}"
+            pp = str(c.passive_perception or self._passive_skill(c, "perception", 5))
+            speed = str(c.speed) if c.speed is not None else "—"
+            state = " [bold #d95841]DOWN[/]" if not c.alive else (" [bold #d9a441]BLOODIED[/]" if c.bloodied else "")
+            lines.append(f"[bold #6aa6d9]{c.name[:16]:<16}[/] [bold {hp_color}]{hp:>8}[/]  {c.ac:>3}  {pp:>3}  {speed:>3}{state}")
+        return "\n".join(lines)
+
+    def _party_passives_markup(self) -> str:
+        members = self._party_members()
+        if not members:
+            return "[dim]No PCs in this encounter.[/]"
+        lines = ["[bold #a8d0ff]NAME             PERCEPTION  INSIGHT  STEALTH[/]"]
+        for c in members:
+            pp = c.passive_perception or self._passive_skill(c, "perception", 5)
+            pi = self._passive_skill(c, "insight", 5)
+            ps = self._passive_skill(c, "stealth", 2)
+            lines.append(f"[bold #6aa6d9]{c.name[:16]:<16}[/] {pp:>10}  {pi:>7}  {ps:>7}")
+        lines.append("")
+        lines.append("[dim]Passive = 10 + skill bonus · advantage/disadvantage shifts ±5[/]")
+        return "\n".join(lines)
+
+    def _party_saves_markup(self) -> str:
+        members = self._party_members()
+        if not members:
+            return "[dim]No PCs in this encounter.[/]"
+        lines = ["[bold #a8d0ff]NAME             SAVES                         SPELL DC[/]"]
+        for c in members:
+            saves = " ".join(
+                f"{ABILITY_NAMES[aid - 1]} {c.save(aid):+d}"
+                for aid in range(1, 7)
+                if c.save(aid) is not None
+            )
+            dc = str(c.spell_dc) if c.spell_dc is not None else "—"
+            lines.append(f"[bold #6aa6d9]{c.name[:16]:<16}[/] {saves or '—':<30} {dc:>8}")
+        lines.append("")
+        lines.append("[dim]Spell DC is imported when D&D Beyond provides it.[/]")
+        return "\n".join(lines)
 
     def _detail_markup(self) -> str:
         c = self._sel
@@ -1043,10 +1126,15 @@ class BattleApp(App[None]):
     def _refresh_log(self) -> None:
         content = self.query_one("#log-content", Static)
         self.query_one("#log-title", Static).update(
-            "BATTLE LOG" if self.view_mode == "combat" else "QUICK NUMBERS"
+            "BATTLE LOG" if self.view_mode == "combat" else (
+                "QUICK NUMBERS" if self.view_mode == "dm_screen" else "CONDITIONS / REMINDERS"
+            )
         )
         if self.view_mode == "dm_screen":
             content.update(panel_text("numbers"))
+            return
+        if self.view_mode == "party":
+            content.update(self._party_conditions_markup())
             return
         content.update(self._log_text())
         if self._log_view is not None:
@@ -1068,6 +1156,17 @@ class BattleApp(App[None]):
             self._messages.pop(0)
         self._refresh_log()
 
+    def _party_conditions_markup(self) -> str:
+        members = self._party_members()
+        if not members:
+            return "[dim]No PCs in this encounter.[/]"
+        lines = []
+        for c in members:
+            conditions = "  ".join(sorted(c.conditions)) or "—"
+            reminder = f"  ·  {c.reminder}" if c.reminder else ""
+            lines.append(f"[bold #6aa6d9]{c.name}[/]  {conditions}{reminder}")
+        return "\n".join(lines)
+
     # -- battle map ----------------------------------------------------------
 
     def _map_title_text(self) -> str:
@@ -1084,8 +1183,8 @@ class BattleApp(App[None]):
         return f"{sel_s}   ·   {hint_text}"
 
     def _init_status_text(self) -> str:
-        if self.view_mode == "dm_screen":
-            return "s switch  ·  Ctrl+1 combat  ·  Ctrl+2 DM Screen  ·  / lookup  ·  ? help"
+        if self.view_mode != "combat":
+            return "s switch  ·  Ctrl+1 combat  ·  Ctrl+2 DM Screen  ·  Ctrl+3 party  ·  / lookup  ·  ? help"
         if self._init_entry is not None and self._sel is not None:
             return (
                 f"[bold #e0c04c]INIT[/] [bold #e6ebf2]{self._init_entry or '--'}[/] → "
@@ -1104,15 +1203,15 @@ class BattleApp(App[None]):
         return "  ·  ".join([hint("↑↓", "select"), hint("n", "next"), hint("r", "roll init"), hint("t", "set init")])
 
     def _log_status_text(self) -> str:
-        if self.view_mode == "dm_screen":
-            return "Fixed 5e quick reference  ·  s switch  ·  Ctrl+1 combat"
+        if self.view_mode != "combat":
+            return "Read-only reference  ·  s switch  ·  Ctrl+1 combat"
         return "  ·  ".join(
             [hint("ctrl+s", "save"), hint("ctrl+l", "load"), hint("u", "undo"), hint("shift+u", "redo")]
         )
 
     def _detail_status_text(self) -> str:
-        if self.view_mode == "dm_screen":
-            return "Rules lookup: /  ·  s switch  ·  Ctrl+1 combat"
+        if self.view_mode != "combat":
+            return "Read-only reference  ·  s switch  ·  Ctrl+1 combat"
         return "  ·  ".join(
             [
                 hint("a", "attack"),
@@ -1192,7 +1291,7 @@ class BattleApp(App[None]):
         self._refresh_all()
 
     def select_at(self, cx: int, cy: int) -> bool:
-        if self.view_mode == "dm_screen":
+        if self.view_mode != "combat":
             return False
         for c in self.combatants:
             if (c.x, c.y) == (cx, cy):

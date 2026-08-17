@@ -16,7 +16,7 @@ trying to become a VTT.
 ### Phase 2 — Party awareness
 
 3. **Party reference mode** — compact AC, passive Perception, passive Insight,
-   saves, spell DCs, and current HP for quick secret checks.
+   saves, spell DCs, and current HP for quick secret checks. **In progress.**
 4. **Better prepared-party workflows** — make campaign loading and encounter
    templates work together without replacing imported character data.
 
@@ -39,5 +39,5 @@ trying to become a VTT.
 
 The table-speed release is complete: DM Screen mode, Quick Numbers, fast
 initiative entry, duplicate monster, bloodied state, turn reminders, local
-dice commands, and laptop-safe shortcuts are shipped. Phase 1 is now in
-progress.
+dice commands, and laptop-safe shortcuts are shipped. Phase 1 is complete;
+Phase 2, item 3 (Party Reference mode), is now in progress.

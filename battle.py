@@ -61,6 +61,7 @@ class Combatant:
     hit_dice: str = ""
     skills: dict[str, int] = field(default_factory=dict)  # skill name -> total bonus
     passive_perception: int | None = None
+    spell_dc: int | None = None
     attacks: list[str] = field(default_factory=list)       # e.g. "Longsword +7 · 1d8+4 sl"
     traits: list[str] = field(default_factory=list)        # special abilities
     spells: list[str] = field(default_factory=list)        # spellcaster spells
