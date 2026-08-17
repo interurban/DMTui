@@ -1,9 +1,19 @@
 {
+  "version": 2,
   "active": "My Campaign",
   "campaigns": {
     "My Campaign": {
-      "character_ids": [],
-      "ruleset": "2014"
+      "party": [
+        {
+          "name": "Mara Stonehand"
+        },
+        {
+          "name": "Tovin Reed",
+          "ddb_id": 12345678
+        }
+      ],
+      "ruleset": "2024",
+      "notes": ""
     }
   }
 }

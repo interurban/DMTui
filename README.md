@@ -45,19 +45,38 @@ export OPENAI_API_KEY="sk-your-key-here"
 
 The app loads `.env` automatically when it starts.
 
-On launch, DMTui asks where to begin: **Resume encounter**, start a new
-encounter with the active campaign, use a prepared encounter, switch campaigns,
-or start without one. The live encounter is remembered automatically in
-`encounter.json`; there is no manual save step. There is one resumable live
-encounter at a time, and starting another replaces that resume point.
+On a fresh install, Ward offers three direct paths: set up a campaign, try a
+ready-to-run sample encounter, or start with an empty battlefield. Campaign
+setup asks for a name and 2014/2024 rules, then accepts one party member per
+line as a D&D Beyond URL, character ID, or plain name. Returning launches
+prioritize **Resume encounter**, followed by the active campaign home. Empty
+prepared-encounter and multi-campaign choices stay hidden until useful.
 
-A campaign is the long-running game. It remembers its party roster, ruleset,
-and notes in the ignored `campaigns.json`. The party is not a separate saved
-object: choose **Edit party** and paste one D&D Beyond character URL or bare
-character ID per line. Those characters are fetched fresh when a new encounter
-starts. `Shift+C` opens the active campaign during play.
-Editing the party never rewrites the encounter already on the table; it takes
-effect the next time that campaign starts an encounter.
+Played encounters are remembered automatically in the ignored
+`campaign-encounters.json`; there is no manual save step. Each campaign keeps
+its own encounter index. Starting another fight pauses the campaign's current
+encounter instead of replacing it, so ten fights can be named, browsed, and
+resumed independently. The startup screen resumes the most recently active
+fight; **Campaigns** opens any campaign without silently starting one.
+
+A campaign is the long-running game. It owns its party roster, ruleset, and
+notes in the ignored `campaigns.json`. A roster entry may be a D&D Beyond
+character (refetched when a new encounter starts) or a manually named
+adventurer (started from editable defaults). `Shift+C` opens the active
+campaign during play. Editing the campaign party never rewrites the encounter
+already on the table; it takes effect the next time that campaign starts an
+encounter. Conversely, encounter damage, conditions, and edits stay in that
+fight and do not silently rewrite the campaign roster.
+
+`Shift+C` opens the campaign home. It shows the current encounter, total open
+and completed encounters, new/prepared encounter actions, party, ruleset,
+notes, and campaign switching. The encounter index sorts **Current** first,
+then **Paused**, then **Complete**, with round, creature count, and last-updated
+date. Selecting an encounter offers resume, rename, or mark complete. Resuming
+a completed encounter reopens it and pauses the previous current fight.
+
+Older single-resume `encounter.json` files migrate automatically as a named
+**Recovered encounter** the first time the new encounter store is opened.
 
 Press `Shift+E` to describe an encounter in plain language. The preview uses
 the loaded party's character levels and aggregate strength—HP, AC, attack
@@ -94,9 +113,11 @@ cannot parse a character when D&D Beyond denies the service request.
 
 ### Preparation tools
 
-Use `Ctrl+E` to save or start a prepared encounter. A prepared encounter stores
-only monsters and their starting positions; the active campaign supplies the
-party. Monsters return at full HP with clear conditions and unrolled initiative.
+Use `Ctrl+E` to save or start a prepared encounter. Prepared encounters are
+reusable monster setups, not played fights: they store only monsters and
+starting positions. Starting one creates a new campaign-owned encounter copy
+with the campaign party, leaving both the template and previous fight intact.
+Monsters return at full HP with clear conditions and unrolled initiative.
 Older templates that contain PCs are loaded safely—the embedded PCs are ignored.
 
 Monsters added from the quick picker or searchable library are scattered across
@@ -135,7 +156,7 @@ remembers the notes; `Esc` cancels.
 | `s` | cycle Combat → DM Screen → Party Reference |
 | `Ctrl+1` / `Ctrl+2` / `Ctrl+3` | open Combat / DM Screen / Party Reference |
 | `Shift+c` | open the active campaign, party, and notes |
-| `Ctrl+n` | new encounter with the current campaign |
+| `Ctrl+n` | name and start another encounter; keep the current one saved |
 | `Ctrl+e` | save/start prepared encounters |
 | `/` | ask the OpenAI DM assistant |
 | `/roll 2d6+4` | roll dice locally without using OpenAI |
@@ -187,6 +208,9 @@ statblocks the rest of the app uses, so they're indistinguishable in play. Set
 - `app.py` — the `BattleApp` TUI: bindings, flows, rendering, CSS.
 - `battle.py` — data model (`Combatant`), dice engine, attack resolution,
   monster library, the starting encounter.
+- `campaigns.py` — campaign, party roster, ruleset, and notes persistence.
+- `encounter_store.py` — named campaign encounters, status, current pointers,
+  atomic persistence, and legacy migration.
 - `ddb.py` — D&D Beyond character-service parsing (`extract_combatant`).
 - `widgets.py` — initiative row, token map, scroll containers.
 - `modals.py` — number/list/text prompts, the help screen, and the import

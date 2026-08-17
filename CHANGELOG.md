@@ -3,6 +3,35 @@
 Sprint log for the Battle Tracker — a single-screen terminal combat tracker
 for D&D 5e DMs (Textual). Run: `dmtui`.
 
+## First-run folio + campaign ownership
+
+- Fresh installs now get a true onboarding menu: set up a campaign, try a
+  sample encounter, or start empty. Returning sessions prioritize resuming the
+  remembered fight and hide empty prepared-encounter choices.
+- Ward branding replaces the old DMTUI/fake-adventure startup chrome; the
+  returning menu reads like a compact campaign ledger with party and ruleset
+  context.
+- Campaigns now persist a real party roster. Entries can reference D&D Beyond
+  or hold a manual adventurer name, so manually added PCs are no longer dropped
+  when the current party becomes a campaign.
+- Existing `character_ids` campaign files migrate transparently to the roster
+  schema. Campaign writes are normalized and atomic.
+- Relationship clarified in code and copy: campaigns own rosters/rules/notes;
+  live encounters reference a campaign but snapshot their fight state; prepared
+  encounters remain reusable monster-only setups.
+- Campaigns now own any number of named encounter instances. Each preserves its
+  round, creatures, positions, HP, conditions, and navigation state; starting
+  another marks the previous current fight paused instead of overwriting it.
+- The campaign home exposes current/open/completed counts without starting a
+  fight. Its encounter index sorts Current → Paused → Complete and supports
+  resume, rename, and mark complete.
+- Campaign switching is now non-destructive. Resuming another fight explicitly
+  activates it, and encounter identity participates in undo/redo world swaps.
+- Prepared encounters remain global templates; starting one now creates a new
+  campaign-owned encounter instance rather than replacing the fight on screen.
+- Legacy `encounter.json` state migrates into `campaign-encounters.json` as a
+  named Recovered encounter.
+
 ## Project cleanup
 
 - Added `pyproject.toml` with project dependency metadata and the `dmtui`

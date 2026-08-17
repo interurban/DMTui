@@ -12,6 +12,9 @@ trying to become a VTT.
    monsters, positions, default HP, clear conditions, and unrolled initiative.
 2. **Campaign scratchpad** — keep a small persistent text area for NPC names,
    clues, loot, passwords, and other session notes.
+3. **Campaign encounter index** — **Complete.** Campaigns keep multiple named
+   Current/Paused/Complete encounter instances; prepared encounters remain
+   reusable monster-only templates.
 
 ### Phase 2 — Party awareness
 
