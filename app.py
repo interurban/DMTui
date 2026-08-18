@@ -17,6 +17,7 @@ import os
 import random
 import re
 
+from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, VerticalScroll
@@ -121,13 +122,84 @@ LOG_COLORS = {
 
 
 def hint(key: str, word: str) -> str:
-    """Render a command hint: the keybind letter highlighted inside the word
-    where it appears, otherwise the key shown before the word."""
-    if len(key) == 1 and key.isalpha():
-        i = word.lower().find(key.lower())
-        if i >= 0:
-            return f"{word[:i]}[bold #e6ebf2]{word[i]}[/][dim]{word[i + 1:]}[/]"
-    return f"[bold #e6ebf2]{key}[/] [dim]{word}[/]"
+    """Render an explicit, consistently cased key followed by its action."""
+    display_key = key
+    if key.startswith("ctrl+"):
+        suffix = key.removeprefix("ctrl+")
+        display_key = f"Ctrl+{suffix.upper() if len(suffix) == 1 else suffix.title()}"
+    return f"[bold #e6ebf2]{display_key}[/] [dim]{word}[/]"
+
+
+def _music_nav_display(player: music.MusicPlayer) -> tuple[str, str]:
+    """Return the compact label and visual state used in Ward's top bar."""
+    source = player.source
+    if source is None:
+        return "♫", "silent"
+    if player.paused:
+        return f"Ⅱ  {source.name}", "paused"
+    return f"♫  {source.name}", "playing"
+
+
+class MusicStatus(Static):
+    """Glanceable playback state and shortcut in the persistent header."""
+
+    DEFAULT_CSS = """
+    MusicStatus {
+        dock: right;
+        width: auto;
+        min-width: 3;
+        max-width: 36;
+        height: 1;
+        padding: 0 1;
+        content-align: center middle;
+        text-wrap: nowrap;
+        text-overflow: ellipsis;
+    }
+    MusicStatus.-silent {
+        color: #657184;
+        background: #1d2330;
+    }
+    MusicStatus.-paused {
+        color: #9aabc2;
+        background: #252d3a;
+        text-style: bold;
+    }
+    MusicStatus.-playing {
+        color: #f0c96a;
+        background: #332d20;
+        text-style: bold;
+    }
+    MusicStatus:hover {
+        color: #f2eee5;
+        background: #3d485c;
+    }
+    """
+
+    def on_mount(self) -> None:
+        self.tooltip = "Music controls · Ctrl+K"
+        self.sync_playback()
+        self.set_interval(1, self.sync_playback, name="update music status")
+
+    def sync_playback(self) -> None:
+        label, state = _music_nav_display(self.app._music)
+        self.set_classes(f"-{state}")
+        self.update(Text(label))
+
+    def on_click(self, event: events.Click) -> None:
+        event.stop()
+        self.app.action_music()
+
+
+class WardHeader(Header):
+    """Ward's title bar with persistent table-audio state."""
+
+    DEFAULT_CSS = """
+    WardHeader HeaderClockSpace { display: none; }
+    """
+
+    def compose(self) -> ComposeResult:
+        yield from super().compose()
+        yield MusicStatus(id="music-status")
 
 
 class BattleApp(App[None]):
@@ -274,15 +346,14 @@ class BattleApp(App[None]):
         Binding("right", "arrow_right", "+HP"),
         Binding("g", "grab", "Grab"),
         Binding("n", "next_turn", "Next turn"),
-        Binding("enter", "attack", "Attack"),
+        Binding("enter, a", "attack", "Attack"),
         Binding("r", "roll_monster_init", "Monster init"),
-        Binding("R", "reset", "Reset"),
+        Binding("ctrl+r", "reset", "Reset encounter"),
         Binding("t", "set_init", "Set init"),
-        Binding("I", "initiative_pass", "Initiative pass"),
+        Binding("ctrl+t", "initiative_pass", "Party initiative"),
         Binding("plus", "duplicate", "Duplicate"),
         Binding("d", "damage", "Damage"),
         Binding("h", "heal", "Heal"),
-        Binding("a", "attack", "Attack"),
         Binding("0", "hp_digit(0)", "0"),
         Binding("1", "hp_digit(1)", "1"),
         Binding("2", "hp_digit(2)", "2"),
@@ -295,25 +366,23 @@ class BattleApp(App[None]):
         Binding("9", "hp_digit(9)", "9"),
         Binding("backspace", "hp_backspace", "Backspace"),
         Binding("c", "condition", "Condition"),
-        Binding("C", "campaign", "Campaign"),
+        Binding("ctrl+o", "campaign", "Campaign folio"),
         Binding("ctrl+e", "encounter_templates", "Prepared encounters"),
-        Binding("E", "ai_encounter", "Encounter assistant"),
+        Binding("ctrl+g", "ai_encounter", "Generate encounter"),
         Binding("m", "monster", "Quick monster"),
-        Binding("ctrl+m", "browse", "Monster library"),
-        Binding("b", "browse", "Monster library"),
-        Binding("M", "browse", "Monster library"),
+        Binding("ctrl+b", "browse", "Monster library"),
         Binding("v", "spell", "Spellbook"),
         Binding("i", "import_pc", "Import PC"),
         Binding("f", "find", "Find"),
         Binding("e", "edit", "Edit"),
         Binding("p", "add_pc", "Add PC"),
-        Binding("P", "music", "Music"),
+        Binding("ctrl+k", "music", "Music"),
         Binding("ctrl+n", "new_encounter", "New encounter"),
         Binding("x", "remove", "Remove"),
         Binding("question_mark", "help", "Help"),
         Binding("escape", "release", "Drop"),
-        Binding("u", "undo", "Undo"),
-        Binding("U", "redo", "Redo"),
+        Binding("ctrl+z", "undo", "Undo"),
+        Binding("ctrl+y", "redo", "Redo"),
         Binding("s", "toggle_view", "Switch view"),
         Binding("q", "quit", "Quit"),
         Binding("slash", "chat", "Chat"),
@@ -362,7 +431,7 @@ class BattleApp(App[None]):
     # -- lifecycle ---------------------------------------------------------
 
     def compose(self) -> ComposeResult:
-        yield Header()
+        yield WardHeader()
         with Container(id="grid"):
             with Container(id="map-panel"):
                 yield Static("", id="map-title")
@@ -440,19 +509,25 @@ class BattleApp(App[None]):
         chat_input.display = self._chat_mode
         if not self._chat_mode:
             if self.view_mode != "combat":
-                hints.update("  ·  ".join([hint("s", "switch"), hint("ctrl+1", "combat"), hint("ctrl+2", "DM screen"), hint("ctrl+3", "party"), hint("/", "lookup"), hint("?", "help"), hint("q", "quit")]))
+                hints.update(
+                    "  ·  ".join(
+                        [
+                            hint("s", "switch view"),
+                            hint("ctrl+1", "combat"),
+                            hint("/", "lookup"),
+                            hint("?", "all keys"),
+                        ]
+                    )
+                )
             else:
                 hints.update(
                     "  ·  ".join(
                     [
-                        hint("n", "next turn"),
-                        hint("d", "damage"),
-                        hint("h", "heal"),
-                        hint("c", "condition"),
-                        hint("s", "references"),
-                        hint("shift+c", "campaign"),
+                        hint("s", "views"),
+                        hint("ctrl+o", "campaign"),
+                        hint("ctrl+n", "new encounter"),
                         hint("/", "lookup"),
-                        hint("?", "more"),
+                        hint("?", "all keys"),
                     ]
                     )
                 )
@@ -1149,10 +1224,12 @@ class BattleApp(App[None]):
                 self._log(f"Music could not be changed: {escape(str(exc))}", kind="warn")
                 return
             self._log(f"Music {'paused' if paused else 'resumed'} · {escape(current.name)}.", kind="music")
+            self.query_one("#music-status", MusicStatus).sync_playback()
         elif picked == "stop":
             name = current.name if current is not None else "stream"
             self._music.stop()
             self._log(f"Music stopped · {escape(name)}.", kind="music")
+            self.query_one("#music-status", MusicStatus).sync_playback()
         elif picked and picked.startswith("play:") and config is not None:
             try:
                 source = config.sources[int(picked[5:])]
@@ -1162,9 +1239,10 @@ class BattleApp(App[None]):
                 return
             self._log(
                 f"Music playing · {escape(source.name)} via {escape(backend)}. "
-                "[bold]Shift+P[/] opens controls.",
+                "[bold]Ctrl+K[/] opens controls.",
                 kind="music",
             )
+            self.query_one("#music-status", MusicStatus).sync_playback()
 
     async def _campaign_flow(self) -> None:
         data = self._campaigns_read()
@@ -2166,12 +2244,12 @@ class BattleApp(App[None]):
         if self.view_mode == "dm_screen":
             grid.update(panel_text("combat"))
             self.query_one("#map-title", Static).update("COMBAT QUICK RULES")
-            self.query_one("#map-status", Static).update("s switch  ·  Ctrl+1 combat  ·  Ctrl+2 DM Screen  ·  Ctrl+3 party  ·  / lookup")
+            self.query_one("#map-status", Static).update("s switch view  ·  Ctrl+1 combat")
             return
         if self.view_mode == "party":
             grid.update(self._party_overview_markup())
             self.query_one("#map-title", Static).update("PARTY REFERENCE")
-            self.query_one("#map-status", Static).update("Current HP · AC · passive Perception · speed")
+            self.query_one("#map-status", Static).update("s switch view  ·  Ctrl+1 combat")
             return
         avail_w = max(1, grid.size.width - LEFT_W)
         cell_w = 4 if avail_w >= 20 else 3
@@ -2382,12 +2460,12 @@ class BattleApp(App[None]):
         if self._moving and sel:
             return f"[bold #3fae6a]MOVING {sel.name}[/] — [bold #e6ebf2]arrows[/] [dim]place[/], [bold #e6ebf2]g[/]/[bold #e6ebf2]esc[/] [dim]drop[/]"
         sel_s = f"[bold #ffffff]{sel.name}[/] @ {coord_name(sel.x, sel.y)}" if sel else "none"
-        hint_text = "  ·  ".join([hint("↑↓", "select"), hint("←→", "±HP"), hint("g", "grab")])
+        hint_text = "  ·  ".join([hint("↑↓", "select"), hint("←→", "±HP"), hint("g", "move")])
         return f"{sel_s}   ·   {hint_text}"
 
     def _init_status_text(self) -> str:
         if self.view_mode != "combat":
-            return "s switch  ·  Ctrl+1 combat  ·  Ctrl+2 DM Screen  ·  Ctrl+3 party  ·  / lookup  ·  ? help"
+            return "s switch view  ·  Ctrl+1 combat"
         if self._init_entry is not None and self._sel is not None:
             return (
                 f"[bold #e0c04c]INIT[/] [bold #e6ebf2]{self._init_entry or '--'}[/] → "
@@ -2403,27 +2481,26 @@ class BattleApp(App[None]):
                 f"[bold #ffffff]{self._sel.name}[/]   ·   "
                 "[bold #e6ebf2]Enter[/] apply · [bold #e6ebf2]Esc[/] cancel"
             )
-        return "  ·  ".join([hint("↑↓", "select"), hint("n", "next"), hint("r", "roll init"), hint("t", "set init")])
+        return "  ·  ".join(
+            [hint("n", "next turn"), hint("r", "monster init"), hint("ctrl+t", "party init")]
+        )
 
     def _log_status_text(self) -> str:
         if self.view_mode != "combat":
-            return "Read-only reference  ·  s switch  ·  Ctrl+1 combat"
+            return "/ lookup  ·  ? all keys"
         return "  ·  ".join(
-            ["[dim]remembered automatically[/]", hint("u", "undo"), hint("shift+u", "redo")]
+            ["[dim]remembered automatically[/]", hint("ctrl+z", "undo"), hint("ctrl+y", "redo")]
         )
 
     def _detail_status_text(self) -> str:
         if self.view_mode != "combat":
-            return "Read-only reference  ·  s switch  ·  Ctrl+1 combat"
+            return "/ lookup  ·  ? all keys"
         return "  ·  ".join(
             [
                 hint("a", "attack"),
                 hint("d", "damage"),
                 hint("h", "heal"),
                 hint("c", "condition"),
-                hint("e", "edit"),
-                hint("x", "remove"),
-                hint("m", "quick monster"),
             ]
         )
 

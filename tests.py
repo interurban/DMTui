@@ -724,19 +724,42 @@ def test_openai_shared_response_errors_are_normalized():
                 raise AssertionError(f"expected {expected!r} error")
 
 
-def test_shifted_letter_bindings_use_terminal_key_events():
+def test_modified_bindings_use_one_ctrl_only_grammar():
     from app import BattleApp
 
     bindings = {binding.key: binding.action for binding in BattleApp.BINDINGS}
-    assert bindings["E"] == "ai_encounter"
-    assert bindings["C"] == "campaign"
-    assert bindings["I"] == "initiative_pass"
-    assert bindings["M"] == "browse"
-    assert bindings["P"] == "music"
-    assert bindings["R"] == "reset"
-    assert bindings["U"] == "redo"
-    assert "ctrl+s" not in bindings and "ctrl+l" not in bindings
-    assert not any(binding.key.startswith("shift+") for binding in BattleApp.BINDINGS)
+    assert {key: action for key, action in bindings.items() if key.startswith("ctrl+")} == {
+        "ctrl+1": "combat_view",
+        "ctrl+2": "dm_screen",
+        "ctrl+3": "party_view",
+        "ctrl+b": "browse",
+        "ctrl+e": "encounter_templates",
+        "ctrl+g": "ai_encounter",
+        "ctrl+k": "music",
+        "ctrl+n": "new_encounter",
+        "ctrl+o": "campaign",
+        "ctrl+r": "reset",
+        "ctrl+t": "initiative_pass",
+        "ctrl+y": "redo",
+        "ctrl+z": "undo",
+    }
+    assert "ctrl+i" not in bindings and "ctrl+m" not in bindings  # terminal aliases for Tab / Enter
+    assert not any(
+        key.startswith("shift+") or (len(key) == 1 and key.isupper())
+        for binding in BattleApp.BINDINGS
+        for key in binding.key.split(",")
+    )
+
+
+def test_panel_key_hints_keep_only_the_local_working_set():
+    from app import BattleApp
+
+    app = BattleApp()
+    assert all(key in app._map_status_text() for key in ("↑↓", "←→", "g"))
+    assert all(key in app._init_status_text() for key in ("n", "r", "Ctrl+T"))
+    assert all(key in app._log_status_text() for key in ("Ctrl+Z", "Ctrl+Y"))
+    assert all(key in app._detail_status_text() for key in ("a", "d", "h", "c"))
+    assert "Ctrl+O" not in app._detail_status_text()
 
 
 def test_music_config_keeps_sources_swappable_and_validated():
@@ -812,6 +835,21 @@ def test_music_player_uses_an_argument_list_and_owns_playback():
     assert player.toggle_pause() is False
     player.stop()
     assert process.terminated and not player.active and player.source is None
+
+
+def test_music_nav_display_distinguishes_silent_playing_and_paused():
+    from app import _music_nav_display
+
+    class Player:
+        source = None
+        paused = False
+
+    player = Player()
+    assert _music_nav_display(player) == ("♫", "silent")
+    player.source = music.MusicSource("Dungeon", "https://audio.example/dungeon.m3u")
+    assert _music_nav_display(player) == ("♫  Dungeon", "playing")
+    player.paused = True
+    assert _music_nav_display(player) == ("Ⅱ  Dungeon", "paused")
 
 
 def test_atomic_json_write_preserves_existing_data_on_failure():

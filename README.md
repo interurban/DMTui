@@ -25,7 +25,7 @@ command and module remain compatibility aliases. Running
 documents both staff code-review passes and every fix that came out of them.
 `ROADMAP.md` tracks the prioritized next features and explicit non-goals.
 
-The optional `/` lookup and `Shift+E` encounter assistant use the OpenAI model
+The optional `/` lookup and `Ctrl+G` encounter assistant use the OpenAI model
 configured in `llm_config.json`. For local secret storage, copy `.env.example` to `.env`
 and add your key:
 
@@ -65,13 +65,13 @@ fight; **Campaigns** opens any campaign without silently starting one.
 A campaign is the long-running game. It owns its party roster, lookup reference
 preference, and notes in the ignored `campaigns.json`. A roster entry may be a D&D Beyond
 character (refetched when a new encounter starts) or a manually named
-adventurer (started from editable defaults). `Shift+C` opens the active
+adventurer (started from editable defaults). `Ctrl+O` opens the active
 campaign during play. Editing the campaign party never rewrites the encounter
 already on the table; it takes effect the next time that campaign starts an
 encounter. Conversely, encounter damage, conditions, and edits stay in that
 fight and do not silently rewrite the campaign roster.
 
-`Shift+C` opens the campaign folio. It puts resume/new-encounter actions first,
+`Ctrl+O` opens the campaign folio. It puts resume/new-encounter actions first,
 then groups encounter preparation, campaign details, backup/recovery, and
 campaign switching. The encounter index sorts **Current** first,
 then **Paused**, then **Complete**, with round, creature count, and last-updated
@@ -90,7 +90,7 @@ protection from disk loss.
 Older single-resume `encounter.json` files migrate automatically as a named
 **Recovered encounter** the first time the new encounter store is opened.
 
-Press `Shift+E` to ask the optional encounter assistant for a monster lineup.
+Press `Ctrl+G` to ask the optional encounter assistant for a monster lineup.
 The preview may include a rough pressure signal informed by the loaded party,
 but it is explicitly not encounter balancing. The DM judges suitability, and
 accepted creatures always resolve to existing built-in/SRD statblocks.
@@ -109,9 +109,12 @@ encounter engine around it.
 
 ### Soundtrack streaming
 
-Press `Shift+P`, or choose **Music** from the campaign folio, to start, pause,
-resume, stop, or change the table soundtrack. Ward stays silent until the DM
-starts a stream and stops its player when Ward exits.
+Press `Ctrl+K`, click the top-bar note, or choose **Music** from the campaign
+folio to start, pause, resume, stop, or change the table soundtrack. Ward stays
+silent until the DM starts a stream and stops its player when Ward exits.
+The top bar shows the current source: gold while playing, blue-gray when paused,
+and a muted note icon when silent. Click the indicator to open the same music
+controls.
 
 The tracked `ward/music_config.json` is the starter catalog and replaceable
 boundary:
@@ -172,11 +175,15 @@ Monsters added from the quick picker or searchable library are scattered across
 the top-centre of the map's first four rows, keeping newly imported enemies
 visible and easy to distinguish from the party.
 
-Press `Shift+C` and choose the active campaign's notes to keep NPC names, clues,
+Press `Ctrl+O` and choose the active campaign's notes to keep NPC names, clues,
 loot, passwords, or anything else useful between sessions. `Ctrl+Enter`
 remembers the notes; `Esc` cancels.
 
 ## Keys
+
+Ward uses one keyboard grammar: bare keys act on the live encounter; `Ctrl`
+opens Ward-wide tools or changes session-level state. Each panel footer shows
+only its essential local commands. Press `?` for this complete reference.
 
 | Key | Action |
 | --- | --- |
@@ -188,25 +195,25 @@ remembers the notes; `Esc` cancels.
 | `d` / `h` | damage / heal (amount prompt) |
 | `0`–`9` / `Backspace` | type or edit an inline damage/healing amount |
 | `c` | toggle a condition |
-| `m` / `Ctrl+m` / `b` / `Shift+m` | quick add / browse the searchable monster library |
+| `m` / `Ctrl+B` | quick add / browse the searchable monster library |
 | `v` | spellbook — browse the SRD and add a spell to the selected creature |
 | `x` | remove the selected creature (asks first) |
 | `r` / `t` | roll monster initiative / set a creature's initiative |
-| `Shift+i` | enter initiative for each unrolled PC in sequence |
+| `Ctrl+T` | enter initiative for each unrolled PC in sequence |
 | `+` | duplicate the selected monster at full HP |
-| `Shift+r` | reset the encounter (undoable) |
+| `Ctrl+R` | reset the encounter (undoable) |
 | `i` | import a PC from a D&D Beyond URL |
 | `p` | add a PC from a name |
-| `Shift+p` | open soundtrack controls |
+| `Ctrl+K` | open soundtrack controls |
 | `e` | edit the selected creature (name, HP, AC, init mod, role, note, scores) |
-| `Shift+e` | ask for a catalog-only encounter suggestion with rough pressure guidance |
+| `Ctrl+G` | ask for a catalog-only encounter suggestion with rough pressure guidance |
 | `f` | find a creature by name or map coordinate (`@B3`, `@AA1`) |
-| `u` / `Shift+u` | undo / redo |
+| `Ctrl+Z` / `Ctrl+Y` | undo / redo |
 | `s` | cycle Combat → DM Screen → Party Reference |
 | `Ctrl+1` / `Ctrl+2` / `Ctrl+3` | open Combat / DM Screen / Party Reference |
-| `Shift+c` | open the active campaign, party, and notes |
-| `Ctrl+n` | name and start another encounter; keep the current one saved |
-| `Ctrl+e` | save/start prepared encounters |
+| `Ctrl+O` | open the active campaign, party, encounters, and notes |
+| `Ctrl+N` | name and start another encounter; keep the current one saved |
+| `Ctrl+E` | save/start prepared encounters |
 | `/` | ask the OpenAI DM assistant |
 | `/roll 2d6+4` | roll dice locally without using OpenAI |
 | `q` / `?` | quit / help |
@@ -239,7 +246,7 @@ stay together.
 
 ## Open5e SRD content
 
-Press `Ctrl+m` (or `b`) to open the monster library and `v` to open the spellbook. Both merge
+Press `Ctrl+B` to open the monster library and `v` to open the spellbook. Both merge
 the hand-authored templates with the official D&D 5e **System Reference
 Document**, fetched from [Open5e](https://open5e.com) on first use and cached to
 `.cache/open5e/`. The first open fetches in the background (needs network, once);

@@ -437,12 +437,12 @@ async def main() -> None:
         # Undo must revert combatant state without rewinding turn/round.
         rnd_before, turn_before = app.round, app._turn.name
         hp_after = [c for c in app.combatants if c.name == target.name][0].hp
-        await pilot.press("u")
+        await pilot.press("ctrl+z")
         await pilot.pause()
         t_undone = [c for c in app.combatants if c.name == target.name][0]
         assert t_undone.hp == hp_before, (t_undone.hp, hp_before)
         assert app.round == rnd_before and app._turn.name == turn_before, (app.round, app._turn.name)
-        await pilot.press("U")
+        await pilot.press("ctrl+y")
         await pilot.pause()
         t_redone = [c for c in app.combatants if c.name == target.name][0]
         assert t_redone.hp == hp_after, (t_redone.hp, hp_after)
@@ -502,7 +502,7 @@ async def main() -> None:
         assert lyra.init == 30, lyra.init
         assert app.combatants[1] is lyra, [c.name for c in app.combatants]
         app.save_screenshot(os.path.join(SHOTS, "18-set-init.png"))
-        await pilot.press("I")
+        await pilot.press("ctrl+t")
         await pilot.pause()
         for value in (12, 14):
             for digit in str(value):
@@ -549,7 +549,7 @@ async def main() -> None:
         await pilot.pause()
         assert any(c.name == "Zephyrin" for c in app.combatants), [c.name for c in app.combatants]
         app.save_screenshot(os.path.join(SHOTS, "26-edit-name.png"))
-        await pilot.press("u")
+        await pilot.press("ctrl+z")
         await pilot.pause()
         assert any(c.name == "Zephyr" for c in app.combatants), [c.name for c in app.combatants]
         zephyr = [c for c in app.combatants if c.name == "Zephyr"][0]
@@ -567,7 +567,7 @@ async def main() -> None:
         await pilot.pause()
         assert tess.ac == 16, tess.ac
         app.save_screenshot(os.path.join(SHOTS, "27-edit-ac.png"))
-        await pilot.press("u")
+        await pilot.press("ctrl+z")
         await pilot.pause()
         tess = [c for c in app.combatants if c.name == "Tess"][0]
         assert tess.ac == 18, tess.ac
@@ -617,7 +617,7 @@ async def main() -> None:
         assert all(c.hp == c.max_hp for c in app.combatants)
 
         # Campaign menu -> scratchpad stores multiline notes in campaigns.json.
-        await pilot.press("C")
+        await pilot.press("ctrl+o")
         await _wait_modal(pilot, ListModal)
         await pilot.press(*(["down"] * 4), "enter")  # campaign details
         await _wait_modal(pilot, ListModal)
@@ -692,7 +692,7 @@ async def main() -> None:
 
         # with everyone dead, advancing must still begin a new round — the
         # dead-skip scan wraps the whole list (regression: round never advanced)
-        await pilot.press("R")
+        await pilot.press("ctrl+r")
         await pilot.pause()
         assert all(c.hp == c.max_hp and c.init is None and not c.conditions for c in app.combatants)
         for c in app.combatants:
@@ -715,11 +715,11 @@ async def main() -> None:
         assert len(app.combatants) == 3, len(app.combatants)
         assert app.round == 1
         assert all(c.hp == c.max_hp for c in app.combatants)
-        await pilot.press("u")
+        await pilot.press("ctrl+z")
         await pilot.pause()
         assert len(app.combatants) == 3, len(app.combatants)
         assert all(c.hp == 0 for c in app.combatants)
-        await pilot.press("U")
+        await pilot.press("ctrl+y")
         await pilot.pause()
         assert len(app.combatants) == 3, len(app.combatants)
         assert all(c.hp == c.max_hp for c in app.combatants)
@@ -737,7 +737,7 @@ async def main() -> None:
         }
         assert sum(record["status"] == "active" for record in campaign_records) == 1
         current_id = app._session_encounter_id
-        await pilot.press("C")
+        await pilot.press("ctrl+o")
         await _wait_modal(pilot, ListModal)
         await pilot.press("down", "down", "enter")  # encounter index
         await _wait_modal(pilot, ListModal)
@@ -750,10 +750,10 @@ async def main() -> None:
         await pilot.pause()
         assert app._session_encounter_id == expected_paused["id"]
         assert app._session_encounter_name == expected_paused["name"]
-        await pilot.press("u")
+        await pilot.press("ctrl+z")
         await pilot.pause()
         assert app._session_encounter_id == current_id
-        await pilot.press("U")
+        await pilot.press("ctrl+y")
         await pilot.pause()
         assert app._session_encounter_id == expected_paused["id"]
 
@@ -762,10 +762,10 @@ async def main() -> None:
         await pilot.pause()
         assert len(app.combatants) == 0, len(app.combatants)
 
-        # monster library browser (Ctrl+M): type a filter, Enter adds the match.
+        # Monster library browser (Ctrl+B): type a filter, Enter adds the match.
         # "goblin shaman" is built-in-only (absent from the SRD cache), so it is
         # always a single match regardless of whether SRD data is present.
-        await pilot.press("ctrl+m")
+        await pilot.press("ctrl+b")
         await pilot.pause()
         await pilot.press(*tuple("goblin shaman"))
         await pilot.pause()
@@ -779,13 +779,13 @@ async def main() -> None:
         # the picker stays open after adding — close it, then undo
         await pilot.press("escape")
         await pilot.pause()
-        await pilot.press("u")
+        await pilot.press("ctrl+z")
         await pilot.pause()
         assert len(app.combatants) == 0, len(app.combatants)
 
         # spellbook (v): add an SRD spell to the selected creature. Guarded so
         # it still passes in a fresh checkout with no SRD spell cache present.
-        await pilot.press("ctrl+m")
+        await pilot.press("ctrl+b")
         await pilot.pause()
         await pilot.press(*tuple("goblin shaman"))
         await pilot.pause()
@@ -814,7 +814,7 @@ async def main() -> None:
             assert any("Mage Hand" in s for s in app._sel.spells), app._sel.spells
             await pilot.press("escape")
             await pilot.pause()
-            await pilot.press("u")
+            await pilot.press("ctrl+z")
             await pilot.pause()
             assert not any("Mage Hand" in s for s in app._sel.spells), app._sel.spells
         else:
