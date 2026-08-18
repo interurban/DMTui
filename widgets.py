@@ -91,10 +91,11 @@ class CombatantRow(Widget):
 
         used = t.cell_len
         for cn in sorted(c.conditions):
-            chip = f"{CONDITIONS[cn]['glyph']} {_abbrev(cn)}"
+            condition = CONDITIONS.get(cn, {"glyph": "?", "color": "#8a93a3"})
+            chip = f"{condition['glyph']} {_abbrev(cn)}"
             if used + len(chip) + 2 > w:
                 break
-            t.append(chip, self._style(CONDITIONS[cn]["color"]))
+            t.append(chip, self._style(condition["color"]))
             used = t.cell_len
             if used + 2 <= w:
                 t.append("  ", bg)

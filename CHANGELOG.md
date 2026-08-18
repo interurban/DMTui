@@ -43,6 +43,22 @@ Sprint log for Ward — a private, table-side tool for D&D Dungeon Masters
 
 ## Reliability bug hunt — August 2026
 
+- Removing the active creature now hands initiative to its actual successor
+  instead of skipping a turn. Removing creatures before initiative begins no
+  longer starts combat implicitly, and removing the last active creature wraps
+  the round correctly.
+- D&D Beyond ability scores now tolerate mixed-format rows one item at a time;
+  malformed response bodies and parsing failures become readable import errors
+  instead of worker crashes.
+- Open5e actions retain negative damage modifiers such as `1d4-1`.
+- Music pause/resume failures no longer leave Ward displaying a state the
+  external player never entered, and raw process errors are reported cleanly.
+- Campaign roster normalization rejects booleans, zero, and negative D&D Beyond
+  IDs. Encounter ownership trims campaign names and consistently maps blank
+  names to campaign-free play.
+- Unknown string conditions from newer or hand-edited encounter state remain
+  visible with a neutral fallback instead of crashing the detail or initiative
+  panels.
 - Healing spells can now target their caster and creatures at 0 HP; damaging
   and control actions still target only living creatures other than the actor.
 - Damage and healing expressions are floored at zero, preventing a negative

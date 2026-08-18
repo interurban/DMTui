@@ -548,6 +548,16 @@ def test_extract_combatant_ignores_malformed_external_collection_rows():
     assert c.attacks == [] and c.ac == 10
 
 
+def test_extract_combatant_ignores_mixed_stat_rows():
+    data = ddb_payload(
+        "Mixed Stats",
+        stats=[{"id": 1, "value": 12}, "bad stat", {"id": 3, "value": 14}],
+    )
+    c = extract_combatant(11, data)
+    assert c.stats == {1: 12, 2: 10, 3: 14, 4: 10, 5: 10, 6: 10}
+    assert c.init_mod == 0
+
+
 def test_fetch_character_data_network_error_raises_value_error():
     with mock.patch.object(urllib.request, "urlopen", side_effect=urllib.error.URLError("boom")):
         try:
@@ -874,6 +884,26 @@ def test_music_player_uses_an_argument_list_and_owns_playback():
     assert process.terminated and not player.active and player.source is None
 
 
+def test_music_pause_failure_does_not_corrupt_player_state():
+    class FailingProcess:
+        def poll(self):
+            return None
+
+        def send_signal(self, _value):
+            raise OSError("player disappeared")
+
+    player = music.MusicPlayer()
+    player._process = FailingProcess()
+    player._source = music.MusicSource("Dungeon", "https://audio.example/dungeon.m3u")
+    try:
+        player.toggle_pause()
+    except RuntimeError as exc:
+        assert "could not pause" in str(exc)
+    else:
+        raise AssertionError("pause process failures must be normalized")
+    assert player.active and not player.paused
+
+
 def test_music_nav_display_distinguishes_silent_playing_and_paused():
     from app import _music_nav_display
 
@@ -978,7 +1008,10 @@ def test_campaign_book_sanitizes_malformed_state():
             "": {},
             "Broken": "not a campaign",
             "  Keepers  ": {
-                "party": [None, "", "  Borin  ", {"ddb_id": "12"}, {"ddb_id": "12"}],
+                "party": [
+                    None, "", True, 0, -1, "0", "  Borin  ",
+                    {"ddb_id": "12"}, {"ddb_id": "12"}, {"ddb_id": False},
+                ],
                 "ruleset": None,
                 "notes": None,
             },
@@ -1159,6 +1192,24 @@ def test_encounter_store_repairs_current_scope_from_record_ownership():
     assert encounter_store.current_for(data, "Right Campaign")["id"] == "right-fight"
 
 
+def test_encounter_store_collapses_blank_campaign_ownership():
+    snapshot = {"combatants": [], "round": 1}
+    data = encounter_store.normalize_store({
+        "current": {"": "loose-fight"},
+        "encounters": {
+            "loose-fight": {"campaign": "", "status": "active", "snapshot": snapshot},
+            "named-fight": {"campaign": "  Keepers  ", "status": "paused", "snapshot": snapshot},
+        },
+    })
+    assert data["encounters"]["loose-fight"]["campaign"] is None
+    assert encounter_store.current_for(data, None)["id"] == "loose-fight"
+    assert encounter_store.records_for(data, None)[0]["id"] == "loose-fight"
+    assert data["encounters"]["named-fight"]["campaign"] == "Keepers"
+
+    created = encounter_store.create_record(data, "   ", "Another", snapshot)
+    assert created["campaign"] is None
+
+
 def test_encounter_store_updates_and_rejects_missing_records():
     data = encounter_store.empty_store()
     record = encounter_store.create_record(
@@ -1217,6 +1268,57 @@ def test_legacy_resume_point_migrates_into_encounter_store():
     assert record["name"] == "Recovered encounter"
     assert record["campaign"] == "Lost Mine"
     assert record["snapshot"]["round"] == 3
+
+
+def test_removing_active_combatant_advances_to_the_actual_successor():
+    from app import BattleApp
+
+    def remove_at(index: int):
+        app = BattleApp()
+        app.combatants = [
+            Combatant(name, "monster", hp=5, max_hp=5, ac=10)
+            for name in ("A", "B", "C")
+        ]
+        app.round = 4
+        app._turn = app.combatants[index]
+        app._sel = app._turn
+        app._log = lambda *_args, **_kwargs: None
+        app._rebuild_rows = lambda: None
+        app._remove_combatant(app._turn)
+        return [c.name for c in app.combatants], app._turn.name, app.round
+
+    assert remove_at(0) == (["B", "C"], "B", 4)
+    assert remove_at(1) == (["A", "C"], "C", 4)
+    assert remove_at(2) == (["A", "B"], "A", 5)
+
+
+def test_removing_combatant_outside_turn_order_does_not_start_combat():
+    from app import BattleApp
+
+    app = BattleApp()
+    app.combatants = [
+        Combatant(name, "monster", hp=5, max_hp=5, ac=10)
+        for name in ("A", "B", "C")
+    ]
+    app._sel = app.combatants[1]
+    app._log = lambda *_args, **_kwargs: None
+    app._rebuild_rows = lambda: None
+    app._remove_combatant(app._sel)
+    assert app._turn is None
+    assert app._sel.name == "C"
+
+
+def test_unknown_restored_condition_remains_renderable():
+    from app import BattleApp
+
+    app = BattleApp()
+    app.combatants = [Combatant(
+        "Scout", "PC", hp=8, max_hp=10, ac=14,
+        conditions={"future-condition"},
+    )]
+    app._sel = app.combatants[0]
+    markup = app._detail_markup()
+    assert "? future-condition" in markup
 
 
 def test_ward_backup_roundtrip_restores_all_user_data():
@@ -1308,6 +1410,14 @@ def test_srd_monster_to_fields():
     assert any("Multiattack" in t for t in f["traits"]), f["traits"]
     assert "Nimble Escape" in f["traits"]
     assert f["saves"] == []  # no saving throws on the goblin
+
+
+def test_srd_action_parser_preserves_negative_damage_modifiers():
+    parsed = srd_client._parse_action(
+        "Weak Claw",
+        "Melee Weapon Attack: +1 to hit. Hit: 1 (1d4 - 1) slashing damage.",
+    )
+    assert parsed == "Weak Claw +1 · 1d4-1 sl"
 
 
 def test_srd_fetch_and_cache():

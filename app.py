@@ -2412,7 +2412,13 @@ class BattleApp(App[None]):
             for tr in c.traits:
                 lines.append(f"[bold #c678dd]◆[/] {tr}")
         if c.conditions:
-            conds = "  ".join(f"[{CONDITIONS[cn]['color']}]{CONDITIONS[cn]['glyph']} {cn}[/]" for cn in sorted(c.conditions))
+            condition_parts = []
+            for cn in sorted(c.conditions):
+                condition = CONDITIONS.get(cn, {"glyph": "?", "color": "#8a93a3"})
+                condition_parts.append(
+                    f"[{condition['color']}]{condition['glyph']} {escape(cn)}[/]"
+                )
+            conds = "  ".join(condition_parts)
             lines.append(f"[bold]CONDITIONS[/]  {conds}")
         if c.note:
             lines.append("")
@@ -3016,7 +3022,11 @@ class BattleApp(App[None]):
         finally:
             if import_modal is not None:
                 import_modal.dismiss()
-        pc = ddb.extract_combatant(cid, data)
+        try:
+            pc = ddb.extract_combatant(cid, data)
+        except (TypeError, ValueError, KeyError, AttributeError) as exc:
+            self._log(f"Import failed: could not read character data ({exc}).", kind="warn")
+            return
         if pc.name == f"Char {cid}":
             source = data.get("character")
             if not isinstance(source, dict):
@@ -3282,17 +3292,40 @@ class BattleApp(App[None]):
         if not picked or not picked.startswith("yes:"):
             return
         self._push_undo()
-        if gone is self._turn:
-            self._turn = None
+        self._remove_combatant(gone)
+
+    def _remove_combatant(self, gone: Combatant) -> None:
+        """Remove one creature without skipping its successor in initiative."""
+        if gone not in self.combatants:
+            return
+        gone_index = self.combatants.index(gone)
+        was_turn = gone is self._turn
         self.combatants.remove(gone)
         self._log(f"{gone.name} removed from the encounter.", kind="remove")
-        if self.combatants:
-            self._sel = self._turn or self.combatants[0]
-            if self._turn is None:
-                self.action_next_turn()
-                self._sel = self._turn or self._sel
-        else:
+        if not self.combatants:
+            self._turn = None
             self._sel = None
+            self._rebuild_rows()
+            return
+
+        if was_turn:
+            count = len(self.combatants)
+            next_index = gone_index % count
+            wrapped = gone_index >= count
+            scanned = 0
+            while scanned < count and not self.combatants[next_index].alive:
+                next_index = (next_index + 1) % count
+                wrapped = wrapped or next_index == 0
+                scanned += 1
+            if wrapped or scanned == count:
+                self.round += 1
+            self._turn = self.combatants[next_index]
+            self._log(f"Turn → {self._turn.name} (round {self.round})", kind="turn")
+            if self._turn.reminder:
+                self._log(f"REMINDER: {self._turn.reminder}", kind="condition")
+
+        nearest_index = min(gone_index, len(self.combatants) - 1)
+        self._sel = self._turn or self.combatants[nearest_index]
         self._rebuild_rows()
 
     # -- edit --------------------------------------------------------------

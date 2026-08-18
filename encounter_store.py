@@ -29,6 +29,11 @@ def scope_key(campaign: str | None) -> str:
     return campaign if campaign else NO_CAMPAIGN
 
 
+def normalize_campaign(campaign: Any) -> str | None:
+    """Collapse invalid and blank ownership values into campaign-free scope."""
+    return campaign.strip() if isinstance(campaign, str) and campaign.strip() else None
+
+
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -60,9 +65,7 @@ def normalize_store(raw: Any) -> dict:
         snapshot = raw_record.get("snapshot")
         if not valid_snapshot(snapshot):
             continue
-        campaign = raw_record.get("campaign")
-        if not isinstance(campaign, str):
-            campaign = None
+        campaign = normalize_campaign(raw_record.get("campaign"))
         status = str(raw_record.get("status") or "paused")
         if status not in VALID_STATUSES:
             status = "paused"
@@ -123,9 +126,10 @@ def write_store(path: str, data: dict) -> None:
 
 
 def records_for(data: dict, campaign: str | None) -> list[dict]:
+    campaign = normalize_campaign(campaign)
     records = [
         record for record in data.get("encounters", {}).values()
-        if isinstance(record, dict) and record.get("campaign") == campaign
+        if isinstance(record, dict) and normalize_campaign(record.get("campaign")) == campaign
     ]
     rank = {"active": 0, "paused": 1, "complete": 2}
     records.sort(key=lambda record: str(record.get("updated_at", "")), reverse=True)
@@ -134,7 +138,7 @@ def records_for(data: dict, campaign: str | None) -> list[dict]:
 
 
 def current_for(data: dict, campaign: str | None) -> dict | None:
-    encounter_id = data.get("current", {}).get(scope_key(campaign))
+    encounter_id = data.get("current", {}).get(scope_key(normalize_campaign(campaign)))
     record = data.get("encounters", {}).get(encounter_id)
     return record if isinstance(record, dict) else None
 
@@ -157,7 +161,7 @@ def create_record(
     timestamp = now_iso()
     record = {
         "id": encounter_id,
-        "campaign": campaign,
+        "campaign": normalize_campaign(campaign),
         "name": name.strip() or "Untitled encounter",
         "status": "active",
         "created_at": timestamp,
@@ -228,7 +232,7 @@ def move_record(data: dict, encounter_id: str, campaign: str | None) -> bool:
     old_scope = scope_key(record.get("campaign") if isinstance(record.get("campaign"), str) else None)
     if data.get("current", {}).get(old_scope) == encounter_id:
         data["current"].pop(old_scope, None)
-    record["campaign"] = campaign
+    record["campaign"] = normalize_campaign(campaign)
     record["updated_at"] = now_iso()
     activate_record(data, encounter_id)
     return True

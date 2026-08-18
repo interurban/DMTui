@@ -6,12 +6,26 @@ makes the active cleanup decisions easier to audit.
 
 ## Bug hunt — August 2026
 
-The post-cleanup hunt reproduced four boundary failures and added regression
-coverage for each: negative dice modifiers crossing zero, healing-target
-eligibility, encounter pointers whose saved scope disagreed with record
-ownership, and malformed rows from D&D Beyond's unsupported external schema.
-The fixes are deliberately at the shared logic/persistence boundaries so the
-UI, recovery path, and future callers receive the same behavior.
+The post-cleanup hunts read every tracked source module and reproduced eleven
+boundary or state-transition failures. The first pass covered negative dice
+results, healing-target eligibility, mismatched encounter scope pointers, and
+malformed D&D Beyond collection rows.
+
+The full-code pass added coverage for seven more cases:
+
+| Area | Reproduced defect and resolution |
+| --- | --- |
+| Turn order | Removing the active creature could skip its immediate successor, and removing a creature before initiative could start combat. Removal now advances from the deleted slot only when a turn was active and increments the round only on a real wrap. |
+| D&D Beyond | A mixed-format ability-score list could raise `AttributeError`; stat rows are now normalized independently, and malformed response bodies/import parsing fail with a user-facing error. |
+| Open5e | Statblock actions with a negative damage modifier were discarded; the SRD parser now retains signed modifiers such as `1d4-1`. |
+| Music | A failed pause/resume signal escaped as `OSError` after changing the displayed pause state; process errors are normalized and state changes only after a successful signal. |
+| Campaign roster | JSON booleans were accepted as D&D Beyond character ID `1`, while zero/negative IDs were retained; only positive, non-boolean IDs now survive normalization. |
+| Encounter ownership | Empty or whitespace-padded campaign names could split the campaign-free index from its records; ownership is now canonicalized at reads, creates, and moves. |
+| Conditions | An unknown condition from newer or hand-edited state crashed both detail and initiative rendering; unknown string conditions now remain visible with a neutral fallback chip. |
+
+These fixes remain at shared logic, persistence, and external-service
+boundaries so UI flows and future callers receive the same behavior. The unit
+suite now exercises 93 cases.
 
 ## Cleanup pass — August 2026
 
@@ -32,7 +46,7 @@ the shipped product.
 | `modals.py` | Consolidated repeated monster/spell search, selection, fetch, and list-rebuild behavior in `_SearchLibrary`; failed fetches now remain visible instead of being silently swallowed. Folio choice formatting moved here from `app.py`. |
 | `persistence.py` | Added one tested atomic JSON writer that preserves the previous file and removes its temporary file when serialization fails. |
 | `srd.py` | Made cache writes use the same atomic persistence path as user-owned data. |
-| `tests.py` | Added behavioral coverage for failed atomic writes; the suite now exercises 80 unit cases. |
+| `tests.py` | Added behavioral coverage for failed atomic writes; the cleanup pass brought the suite to 80 unit cases, and the subsequent bug hunts expanded it to 93. |
 | `ward_backup.py` | Removed two more copies of atomic JSON-write and cleanup code. |
 | `pyproject.toml` | Ships the new persistence module. |
 
@@ -42,9 +56,7 @@ the shipped product.
 | --- | --- |
 | `battle.py` | Pure combat and dice logic remains cohesive and heavily exercised. No dead public definitions or imports were found. |
 | `dm_screen.py` | Static read-only reference data is already isolated from encounter mutation. |
-| `music.py` | Source configuration, backend selection, and subprocess ownership are separated cleanly; commands use argument lists rather than a shell. |
 | `openai_client.py` | Shared request/config helpers already remove the earlier duplication. The optional integration remains isolated from core encounter use. |
-| `widgets.py` | Small rendering-only module; no abandoned widget classes were found. |
 | `ward/` | Canonical installed entry point and packaged music catalog are both active. |
 | `dmtui/` | Retained only as the documented command/module compatibility alias. |
 | `smoke.py` | Its long linear scenario is intentional: it records one end-to-end table session and catches navigation regressions. Splitting it would obscure sequence and shared state. |

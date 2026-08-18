@@ -160,9 +160,13 @@ class MusicPlayer:
         resume_signal = getattr(signal, "SIGCONT", None)
         if pause_signal is None or resume_signal is None:
             raise RuntimeError("Pause is not supported by this operating system")
-        self._paused = not self._paused
-        self._process.send_signal(pause_signal if self._paused else resume_signal)
-        return self._paused
+        paused = not self._paused
+        try:
+            self._process.send_signal(pause_signal if paused else resume_signal)
+        except OSError as exc:
+            raise RuntimeError(f"Music player could not {'pause' if paused else 'resume'}: {exc}") from exc
+        self._paused = paused
+        return paused
 
     def stop(self) -> None:
         process = self._process

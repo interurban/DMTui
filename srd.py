@@ -88,11 +88,11 @@ _TO_HIT = re.compile(r"([+-]?\d+)\s+to\s+hit", re.IGNORECASE)
 # Matches both "Hit: 5 (1d6 + 2) slashing damage" and
 # "taking 21 (6d6) fire damage …" (save-based breath weapons).
 _HIT_DMG = re.compile(
-    r"(?:Hit:|taking\s+\d+)\s*(?:\d+\s*)?\(\s*([0-9d+\s]+?)\s*\)\s*([A-Za-z ]+?)\s+damage",
+    r"(?:Hit:|taking\s+\d+)\s*(?:\d+\s*)?\(\s*([0-9d+\-\s]+?)\s*\)\s*([A-Za-z ]+?)\s+damage",
     re.IGNORECASE,
 )
 _DC = re.compile(r"DC\s+(\d+)\s+([A-Za-z]+)\s+saving throw", re.IGNORECASE)
-_INNER = re.compile(r"(\d*)d(\d+)(?:\s*\+\s*(\d+))?")
+_INNER = re.compile(r"(\d*)d(\d+)(?:\s*([+-])\s*(\d+))?")
 
 
 def _abbr(damage_type: str) -> str:
@@ -207,8 +207,9 @@ def _parse_action(name: str, desc: str | None) -> str | None:
         if inner:
             n = inner.group(1) or "1"
             die = inner.group(2)
-            bonus = inner.group(3)
-            dice = f"{n}d{die}" + (f"+{bonus}" if bonus else "")
+            sign = inner.group(3)
+            bonus = inner.group(4)
+            dice = f"{n}d{die}" + (f"{sign}{bonus}" if sign and bonus else "")
             dtype = _abbr(hit.group(2))
             if to_hit:
                 return f"{name} {int(to_hit.group(1)):+d} · {dice} {dtype}"

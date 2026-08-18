@@ -133,13 +133,15 @@ def fetch_character_data(character_id: int) -> dict:
     if not isinstance(payload, dict):
         raise ValueError("D&D Beyond returned an unexpected response")
     data = payload.get("data") or {}
+    if not isinstance(data, dict):
+        raise ValueError("D&D Beyond returned an unexpected response")
     if data.get("character") is None and not payload.get("success", True):
         raise ValueError(payload.get("message", "character not found"))
     return data
 
 
 def extract_combatant(character_id: int, data: dict) -> Combatant:
-    character = data.get("character")
+    character = data.get("character") if isinstance(data, dict) else None
     if not isinstance(character, dict) or not character:
         character = data if isinstance(data, dict) else {}
     name = character.get("name") or f"Char {character_id}"
@@ -162,22 +164,33 @@ def extract_combatant(character_id: int, data: dict) -> Combatant:
         total_level = 1
 
     # ability scores (ids: 1 STR, 2 DEX, 3 CON, 4 INT, 5 WIS, 6 CHA)
-    dex_mod = con_mod = 0
     stats = character.get("stats")
+    stat_values: dict[int, int] = {}
     if isinstance(stats, dict):
-        # dict form may arrive with string keys in any order — sort by id
-        stats = [stats[k] for k in sorted(stats, key=_int)]
-    if isinstance(stats, list) and stats and isinstance(stats[0], dict):
-        for stat in stats:
-            s_id = _int(stat.get("id"))
-            value = _int(stat.get("value"), 10)
-            if s_id == 2:
-                dex_mod = (value - 10) // 2
-            elif s_id == 3:
-                con_mod = (value - 10) // 2
-    elif isinstance(stats, list) and stats and isinstance(stats[0], int) and len(stats) >= 3:
-        dex_mod = (int(stats[1]) - 10) // 2
-        con_mod = (int(stats[2]) - 10) // 2
+        stat_rows = list(stats.items())
+        for raw_id, stat in stat_rows:
+            if isinstance(stat, dict):
+                ability_id = _int(stat.get("id"), _int(raw_id))
+                value = _int(stat.get("value"), 10)
+            else:
+                ability_id = _int(raw_id)
+                value = _int(stat, 10)
+            if 1 <= ability_id <= 6:
+                stat_values[ability_id] = value
+    elif isinstance(stats, list):
+        for index, stat in enumerate(stats[:6], start=1):
+            if isinstance(stat, dict):
+                ability_id = _int(stat.get("id"))
+                value = _int(stat.get("value"), 10)
+            elif isinstance(stat, (int, float)) and not isinstance(stat, bool):
+                ability_id = index
+                value = int(stat)
+            else:
+                continue
+            if 1 <= ability_id <= 6:
+                stat_values[ability_id] = value
+    dex_mod = (stat_values.get(2, 10) - 10) // 2
+    con_mod = (stat_values.get(3, 10) - 10) // 2
 
     # hit points: hit dice base + CON per level (+ any flat bonus)
     max_hp = None
@@ -238,13 +251,6 @@ def extract_combatant(character_id: int, data: dict) -> Combatant:
         if rname:
             race = f"{rname} "
 
-    stat_values = {}
-    if isinstance(stats, list) and stats and isinstance(stats[0], dict):
-        for stat in stats:
-            stat_values[_int(stat.get("id"))] = _int(stat.get("value"))
-    elif isinstance(stats, list) and stats and isinstance(stats[0], int):
-        for i, value in enumerate(stats[:6]):
-            stat_values[i + 1] = int(value)
     note = f"{race}{role}. Imported from D&D Beyond."
 
     def _stat_mod(aid: int) -> int:

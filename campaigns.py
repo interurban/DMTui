@@ -27,7 +27,9 @@ def normalize_member(value: Any) -> dict | None:
     if isinstance(value, dict):
         name = str(value.get("name") or "").strip()
         raw_id = value.get("ddb_id")
-    elif isinstance(value, int) or (isinstance(value, str) and value.strip().isdigit()):
+    elif (isinstance(value, int) and not isinstance(value, bool)) or (
+        isinstance(value, str) and value.strip().isdigit()
+    ):
         name = ""
         raw_id = value
     elif isinstance(value, str):
@@ -37,8 +39,12 @@ def normalize_member(value: Any) -> dict | None:
         return None
 
     ddb_id = None
-    if isinstance(raw_id, int) or (isinstance(raw_id, str) and raw_id.strip().isdigit()):
-        ddb_id = int(raw_id)
+    if (isinstance(raw_id, int) and not isinstance(raw_id, bool)) or (
+        isinstance(raw_id, str) and raw_id.strip().isdigit()
+    ):
+        parsed_id = int(raw_id)
+        if parsed_id > 0:
+            ddb_id = parsed_id
     if not name and ddb_id is None:
         return None
 
