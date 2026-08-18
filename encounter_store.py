@@ -18,6 +18,7 @@ from persistence import write_json_atomic
 STORE_VERSION = 1
 NO_CAMPAIGN = "__campaign_free__"
 VALID_STATUSES = {"active", "paused", "complete"}
+SNAPSHOT_REQUIRED_FIELDS = {"name", "kind", "hp", "max_hp", "ac"}
 
 
 def empty_store() -> dict:
@@ -36,6 +37,18 @@ def new_id() -> str:
     return uuid.uuid4().hex[:12]
 
 
+def valid_snapshot(snapshot: Any) -> bool:
+    """Return whether a snapshot has enough structure to be resumed safely."""
+    if not isinstance(snapshot, dict) or not isinstance(snapshot.get("combatants"), list):
+        return False
+    return all(
+        isinstance(creature, dict)
+        and SNAPSHOT_REQUIRED_FIELDS.issubset(creature)
+        and ("stats" not in creature or isinstance(creature["stats"], dict))
+        for creature in snapshot["combatants"]
+    )
+
+
 def normalize_store(raw: Any) -> dict:
     if not isinstance(raw, dict) or not isinstance(raw.get("encounters"), dict):
         return empty_store()
@@ -45,7 +58,7 @@ def normalize_store(raw: Any) -> dict:
         if not encounter_id or not isinstance(raw_record, dict):
             continue
         snapshot = raw_record.get("snapshot")
-        if not isinstance(snapshot, dict) or not isinstance(snapshot.get("combatants"), list):
+        if not valid_snapshot(snapshot):
             continue
         campaign = raw_record.get("campaign")
         if not isinstance(campaign, str):
@@ -67,13 +80,19 @@ def normalize_store(raw: Any) -> dict:
         if raw_record.get("source_template"):
             encounters[encounter_id]["source_template"] = str(raw_record["source_template"])
 
-    current: dict[str, str] = {}
+    current_candidates: dict[str, list[str]] = {}
     raw_current = raw.get("current")
     if isinstance(raw_current, dict):
-        for raw_scope, raw_id in raw_current.items():
+        for raw_id in raw_current.values():
             encounter_id = str(raw_id)
             if encounter_id in encounters:
-                current[str(raw_scope)] = encounter_id
+                campaign = encounters[encounter_id]["campaign"]
+                canonical_scope = scope_key(campaign)
+                current_candidates.setdefault(canonical_scope, []).append(encounter_id)
+    current = {
+        scope: max(ids, key=lambda encounter_id: encounters[encounter_id]["updated_at"])
+        for scope, ids in current_candidates.items()
+    }
     current_ids = set(current.values())
     for encounter_id, record in encounters.items():
         if record["status"] == "active" and encounter_id not in current_ids:

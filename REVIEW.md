@@ -4,6 +4,15 @@ This is the current file-by-file maintenance record. Historical product changes
 and fixed defects live in `CHANGELOG.md`; keeping that history out of this file
 makes the active cleanup decisions easier to audit.
 
+## Bug hunt — August 2026
+
+The post-cleanup hunt reproduced four boundary failures and added regression
+coverage for each: negative dice modifiers crossing zero, healing-target
+eligibility, encounter pointers whose saved scope disagreed with record
+ownership, and malformed rows from D&D Beyond's unsupported external schema.
+The fixes are deliberately at the shared logic/persistence boundaries so the
+UI, recovery path, and future callers receive the same behavior.
+
 ## Cleanup pass — August 2026
 
 The pass looked for unused imports and definitions, duplicated persistence and

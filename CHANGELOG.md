@@ -41,6 +41,18 @@ Sprint log for Ward — a private, table-side tool for D&D Dungeon Masters
   Beyond inventory walk, and replaced the stale review diary with a current
   file-by-file audit.
 
+## Reliability bug hunt — August 2026
+
+- Healing spells can now target their caster and creatures at 0 HP; damaging
+  and control actions still target only living creatures other than the actor.
+- Damage and healing expressions are floored at zero, preventing a negative
+  spell result from increasing its target's HP.
+- Encounter-store recovery now rejects snapshots missing required combatant
+  fields and rebuilds each current-fight pointer from the encounter's actual
+  campaign ownership instead of trusting a stale scope key.
+- D&D Beyond imports now skip malformed rows in external class, inventory, and
+  modifier collections instead of aborting the entire character import.
+
 ## First-run folio + campaign ownership
 
 - Fresh installs now get a true onboarding menu: set up a campaign, try a

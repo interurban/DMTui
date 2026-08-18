@@ -131,6 +131,26 @@ _DARTS_RE = re.compile(r"(\d+)\s+darts?\b", re.IGNORECASE)
 _SAVE_ABILITY_ID = {"str": 1, "dex": 2, "con": 3, "int": 4, "wis": 5, "cha": 6}
 
 
+def is_healing_action(action: str) -> bool:
+    """Return whether an action should restore HP instead of dealing damage."""
+    return bool(_HEAL_RE.search(action))
+
+
+def action_targets(
+    combatants: list[Combatant],
+    actor: Combatant,
+    action: str,
+) -> list[Combatant]:
+    """Return tracker targets for a damage/control or healing action.
+
+    Healing may target the caster and creatures at 0 HP. Other actions retain
+    the encounter tracker's existing living, non-self target rule.
+    """
+    if is_healing_action(action):
+        return list(combatants)
+    return [target for target in combatants if target.alive and target is not actor]
+
+
 def roll_dice(spec: str, rng=random) -> tuple[int, list[int], int]:
     """Roll a dice expression like '2d6+3' -> (total, [each die], bonus)."""
     m = re.fullmatch(r"(\d*)d(\d+)([+-]\d+)?", spec.strip())
@@ -175,6 +195,7 @@ def resolve_attack(attacker: Combatant, action: str, target: Combatant, rng=rand
                 extra, extra_rolls, _ = roll_dice(dice.replace(f"{dmg_bonus:+d}", ""), rng)
                 total += extra
                 rolls = rolls + extra_rolls
+            total = max(0, total)
         else:
             total, rolls, dmg_bonus = 0, [], 0
         return {
@@ -183,7 +204,7 @@ def resolve_attack(attacker: Combatant, action: str, target: Combatant, rng=rand
             "dice": rolls, "dice_bonus": dmg_bonus, "dtype": dtype,
         }
     dm = _DICE_RE.search(action)
-    healing = bool(_HEAL_RE.search(action))
+    healing = is_healing_action(action)
     save_m = _SAVE_RE.search(action)
     total, rolls, dmg_bonus = 0, [], 0
     if dm is not None:
@@ -194,6 +215,7 @@ def resolve_attack(attacker: Combatant, action: str, target: Combatant, rng=rand
                 extra, extra_rolls, _ = roll_dice(dm.group(0), rng)
                 total += extra
                 rolls = rolls + extra_rolls
+        total = max(0, total)
     if save_m is not None and not healing:
         ability = save_m.group(1).lower()
         aid = _SAVE_ABILITY_ID.get(ability)

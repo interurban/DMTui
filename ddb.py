@@ -64,9 +64,9 @@ def _iter_modifiers(character: dict):
     if isinstance(mods, dict):
         for group in mods.values():
             if isinstance(group, list):
-                yield from group
+                yield from (modifier for modifier in group if isinstance(modifier, dict))
     elif isinstance(mods, list):
-        yield from mods
+        yield from (modifier for modifier in mods if isinstance(modifier, dict))
 
 
 def _as_list(value) -> list:
@@ -75,6 +75,11 @@ def _as_list(value) -> list:
     if isinstance(value, dict):
         return list(value.values())
     return []
+
+
+def _dicts(value) -> list[dict]:
+    """Keep object rows from a best-effort external collection."""
+    return [item for item in _as_list(value) if isinstance(item, dict)]
 
 
 def _int(value, default: int = 0) -> int:
@@ -141,10 +146,8 @@ def extract_combatant(character_id: int, data: dict) -> Combatant:
 
     total_level = 0
     parts = []
-    classes = _as_list(character.get("classes"))
+    classes = _dicts(character.get("classes"))
     for cls in classes:
-        if not isinstance(cls, dict):
-            continue
         definition = cls.get("definition")
         if isinstance(definition, str):
             definition = {"name": definition}
@@ -194,7 +197,7 @@ def extract_combatant(character_id: int, data: dict) -> Combatant:
     dex_cap = None
     wearing_armor = False
     shield_bonus = 0
-    inventory = _as_list(character.get("inventory"))
+    inventory = _dicts(character.get("inventory"))
     for item in inventory:
         if not item.get("equipped"):
             continue

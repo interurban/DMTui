@@ -9,6 +9,7 @@ import tempfile
 from unittest import mock
 
 from battle import (
+    action_targets,
     Combatant,
     coord_name,
     find_free_spot,
@@ -175,6 +176,25 @@ def test_resolve_critical_damage_variants():
         result = resolve_attack(dent(), attack, hobgoblin(), Seq(rolls))
         assert result["crit"], label
         assert (result["damage"], result["dice"], result["dice_bonus"]) == (damage, dice, bonus), label
+
+
+def test_damage_and_healing_never_go_negative():
+    target = hobgoblin()
+    weapon = resolve_attack(dent(), "Weak Swipe +7 · 1d4-5 sl", target, Seq([10, 1]))
+    spell = resolve_attack(dent(), "Weak Hex — 1d4-5 necrotic", target, Seq([1]))
+    healing = resolve_attack(dent(), "Weak Cure — 1d4-5 HP", target, Seq([1]))
+    assert weapon["damage"] == 0
+    assert spell["damage"] == 0
+    assert healing["heal"] and healing["damage"] == 0
+
+
+def test_healing_can_target_self_and_downed_creatures():
+    caster = Combatant("Healer", "PC", hp=4, max_hp=10, ac=10)
+    downed = Combatant("Downed", "PC", hp=0, max_hp=10, ac=10)
+    enemy = Combatant("Enemy", "monster", hp=5, max_hp=5, ac=10)
+    combatants = [caster, downed, enemy]
+    assert action_targets(combatants, caster, "Cure Wounds — 1d8+2 HP") == combatants
+    assert action_targets(combatants, caster, "Longsword +4 · 1d8+2 sl") == [enemy]
 
 
 def test_short_label():
@@ -514,6 +534,18 @@ def test_extract_combatant_negative_removed_hp_clamped():
     stats = {**DEFAULT_STATS, "1": 16, "3": 14}
     c = extract_combatant(8, ddb_payload("Hearty", stats=stats, removedHitPoints=-5))
     assert c.hp == c.max_hp  # a negative 'removed' value must not push hp above max
+
+
+def test_extract_combatant_ignores_malformed_external_collection_rows():
+    data = ddb_payload(
+        "Resilient",
+        classes=["bad class", {"level": 2, "definition": {"name": "Cleric"}}],
+        inventory=[None, "bad item"],
+        modifiers={"bonus": ["bad modifier", None]},
+    )
+    c = extract_combatant(10, data)
+    assert c.name == "Resilient" and c.role == "Cleric 2"
+    assert c.attacks == [] and c.ac == 10
 
 
 def test_fetch_character_data_network_error_raises_value_error():
@@ -1096,6 +1128,7 @@ def test_encounter_store_repairs_malformed_state():
             },
             "stray": {"campaign": "Keepers", "status": "active", "snapshot": snapshot},
             "broken": {"snapshot": "not a snapshot"},
+            "missing-fields": {"snapshot": {"combatants": [{"name": "Goblin"}]}},
         },
     })
     assert set(data["encounters"]) == {"kept", "stray"}
@@ -1107,6 +1140,23 @@ def test_encounter_store_repairs_malformed_state():
     assert data["encounters"]["kept"]["status"] == "active"
     assert data["encounters"]["kept"]["source_template"] == "99"
     assert data["encounters"]["stray"]["status"] == "paused"
+
+
+def test_encounter_store_repairs_current_scope_from_record_ownership():
+    snapshot = {"combatants": [], "round": 1}
+    data = encounter_store.normalize_store({
+        "current": {"Wrong Campaign": "right-fight"},
+        "encounters": {
+            "right-fight": {
+                "campaign": "Right Campaign",
+                "status": "active",
+                "updated_at": "2026-08-17T12:00:00+00:00",
+                "snapshot": snapshot,
+            },
+        },
+    })
+    assert encounter_store.current_for(data, "Wrong Campaign") is None
+    assert encounter_store.current_for(data, "Right Campaign")["id"] == "right-fight"
 
 
 def test_encounter_store_updates_and_rejects_missing_records():

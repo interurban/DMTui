@@ -26,6 +26,7 @@ from rich.markup import escape
 from rich.text import Text
 
 from battle import (
+    action_targets,
     CONDITIONS,
     DEATH_LINES,
     HEAL_LINES,
@@ -793,15 +794,7 @@ class BattleApp(App[None]):
 
     @staticmethod
     def _valid_encounter_snapshot(snap: object) -> bool:
-        if not isinstance(snap, dict) or not isinstance(snap.get("combatants"), list):
-            return False
-        required = {"name", "kind", "hp", "max_hp", "ac"}
-        return all(
-            isinstance(creature, dict)
-            and required.issubset(creature)
-            and ("stats" not in creature or isinstance(creature["stats"], dict))
-            for creature in snap["combatants"]
-        )
+        return encounter_store.valid_snapshot(snap)
 
     def _encounters_read(self) -> dict:
         data = encounter_store.read_store(CAMPAIGN_ENCOUNTERS_PATH)
@@ -2880,15 +2873,15 @@ class BattleApp(App[None]):
         picked = await self.push_screen(ListModal("ATTACK WITH", actions), wait_for_dismiss=True)
         if picked is None or self._sel is not c:
             return
-        alive = [t for t in self.combatants if t.alive and t is not c]
-        if not alive:
-            self._log("No living targets.", kind="warn")
+        targets = action_targets(self.combatants, c, picked)
+        if not targets:
+            self._log("No eligible targets.", kind="warn")
             return
-        options = [(t.name, f"{t.name}  [dim]hp {t.hp}/{t.max_hp} · ac {t.ac}[/]") for t in alive]
+        options = [(t.name, f"{t.name}  [dim]hp {t.hp}/{t.max_hp} · ac {t.ac}[/]") for t in targets]
         target_name = await self.push_screen(ListModal("TARGET", options), wait_for_dismiss=True)
         if target_name is None:
             return
-        target = next((t for t in alive if t.name == target_name), None)
+        target = next((t for t in targets if t.name == target_name), None)
         if target is None:
             return
         result = resolve_attack(c, picked, target, rng=self._rng)
