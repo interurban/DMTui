@@ -10,6 +10,19 @@ from textual.widgets import Button, Input, Label, ListItem, ListView, Static, Te
 from rich.markup import escape
 
 
+def _menu_entry(key: str, label: str) -> ListItem:
+    """Build a folio-style menu row with room for an optional detail line."""
+    classes = ["menu-entry"]
+    if "\n" in label:
+        classes.append("menu-entry-two-line")
+    if key in {"back", "cancel", "quit"}:
+        classes.append("menu-entry-quiet")
+    return ListItem(
+        Label(label, classes="modal-item"),
+        classes=" ".join(classes),
+    )
+
+
 class NumberModal(ModalScreen[int]):
     BINDINGS = [("escape", "cancel", "Cancel")]
 
@@ -46,21 +59,36 @@ class NumberModal(ModalScreen[int]):
 class ListModal(ModalScreen[str]):
     BINDINGS = [("escape", "cancel", "Cancel")]
 
-    def __init__(self, title: str, options: list[tuple[str, str]], *, wide: bool = False) -> None:
+    def __init__(
+        self,
+        title: str,
+        options: list[tuple[str, str]],
+        *,
+        wide: bool = False,
+        compact: bool = False,
+    ) -> None:
         super().__init__()
         self._title = title
         self._options = options
         self._wide = wide
+        self._compact = compact
 
     def compose(self) -> ComposeResult:
-        classes = "modal-box wide-modal" if self._wide else "modal-box"
-        with Container(classes=classes):
+        classes = ["modal-box"]
+        if self._wide:
+            classes.append("wide-modal")
+        if self._compact:
+            classes.append("compact-modal")
+        with Container(classes=" ".join(classes)):
             yield Static(f"[bold #e6ebf2]{self._title}[/]", classes="modal-title")
             yield ListView(
-                *[ListItem(Label(label, classes="modal-item")) for _, label in self._options],
+                *[_menu_entry(key, label) for key, label in self._options],
                 id="modal-list",
             )
-            yield Static("[dim][bold]Enter[/] choose · [bold]Esc[/] back[/]", classes="modal-hint")
+            yield Static(
+                "↑↓ move   Enter choose   Esc back",
+                classes="modal-hint",
+            )
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         idx = event.list_view.index
@@ -119,15 +147,23 @@ class StartModal(ModalScreen[str]):
 
     def compose(self) -> ComposeResult:
         with Container(classes="modal-box startup-box"):
-            yield Static("[bold #a8d0ff]⚔  WARD[/]  [#8a93a3]DM'S FOLIO[/]", classes="modal-title")
             yield Static(
-                f"[bold #e6ebf2]{self._prompt}[/]\n[dim]{self._subtitle}[/]"
+                "[bold #a8d0ff]WARD[/]  [#566172]╱[/]  [bold #c9d3e0]DM'S FOLIO[/]",
+                classes="modal-title startup-title",
             )
+            yield Static(
+                f"[bold #e6ebf2]{self._prompt}[/]\n[#8a93a3]{self._subtitle}[/]",
+                classes="startup-intro",
+            )
+            yield Static("CHOOSE A PATH", classes="menu-kicker")
             yield ListView(
-                *[ListItem(Label(label, classes="modal-item")) for _, label in self._options],
+                *[_menu_entry(key, label) for key, label in self._options],
                 id="modal-list",
             )
-            yield Static("[dim][bold]Enter[/] — start   ·   [bold]Esc[/] — quit[/]", classes="modal-hint")
+            yield Static(
+                "↑↓ move   Enter open   Esc quit",
+                classes="modal-hint",
+            )
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         index = event.list_view.index
@@ -579,7 +615,8 @@ class HelpModal(ModalScreen[None]):
                 "  [bold]ctrl+n[/]: another encounter   ·   [bold]shift+r[/]: reset encounter\n\n"
                 "[bold #a8d0ff]CAMPAIGN AND WARD DATA[/]\n"
                 "  [bold]shift+c[/]: campaign folio, encounters, party, notes, backup and restore\n"
-                "  Ward remembers live encounters automatically.   [bold]?[/]: help   ·   [bold]q[/]: quit\n\n"
+                "  [bold]shift+p[/]: soundtrack controls   ·   Ward remembers live encounters automatically.\n"
+                "  [bold]?[/]: help   ·   [bold]q[/]: quit\n\n"
                 "[dim]The map is a quick note that mirrors the physical table—not a virtual tabletop.\n"
                 "Click to select; [bold]g[/] grabs and arrows place. Blue = PC · red = monster.[/]",
                 classes="modal-help",

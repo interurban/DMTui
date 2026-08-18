@@ -27,6 +27,9 @@ Ward is organized around three moments rather than a growing feature catalog:
 - **Complete: backup and recovery.** A portable Ward backup contains campaigns,
   parties, notes, played encounters, and reusable monster setups; restore first
   preserves the data it replaces.
+- **Complete: table ambience.** Optional soundtrack controls use a replaceable
+  stream catalog and a narrow external-player boundary rather than binding Ward
+  to a music service.
 - **Next: real-session observation.** Use Ward at several physical tables and
   record which actions interrupt play, which shortcuts are remembered, and
   which screens go unused. Simplify from evidence before adding automation.

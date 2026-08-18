@@ -25,6 +25,7 @@ py-modules = [
     "ddb",
     "dm_screen",
     "encounter_store",
+    "music",
     "modals",
     "openai_client",
     "srd",
@@ -33,5 +34,5 @@ py-modules = [
 ]
 
 [tool.setuptools.package-data]
-ward = ["py.typed"]
+ward = ["py.typed", "music_config.json"]
 dmtui = ["py.typed"]

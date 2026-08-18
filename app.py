@@ -46,6 +46,7 @@ from battle import (
 import campaigns as campaign_store
 import ddb
 import encounter_store
+import music
 import openai_client
 import ward_backup
 from ddb import ABILITY_NAMES
@@ -59,6 +60,7 @@ CAMPAIGN_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "campai
 ENCOUNTER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "encounters.json")
 CAMPAIGN_ENCOUNTERS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "campaign-encounters.json")
 BACKUP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ward-backups")
+MUSIC_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ward", "music_config.json")
 
 DEFAULT_RULESET = campaign_store.DEFAULT_RULESET
 
@@ -100,6 +102,7 @@ LOG_COLORS = {
     "select": "#8a93a3",
     "remove": "#b39ddb",
     "dm": "#c678dd",
+    "music": "#d2aa5a",
 }
 
 
@@ -111,6 +114,22 @@ def hint(key: str, word: str) -> str:
         if i >= 0:
             return f"{word[:i]}[bold #e6ebf2]{word[i]}[/][dim]{word[i + 1:]}[/]"
     return f"[bold #e6ebf2]{key}[/] [dim]{word}[/]"
+
+
+def folio_choice(verb: str, title: str, detail: str = "") -> str:
+    """Align a menu choice like a labelled entry in the DM's folio."""
+    accents = {
+        "RESUME": "#a8d0ff",
+        "RUN": "#e6ebf2",
+        "PREPARE": "#9fb0c6",
+        "RESTORE": "#d2aa5a",
+        "PLAY": "#d2aa5a",
+    }
+    label = verb.upper()
+    first_line = f"[bold {accents.get(label, '#c9d3e0')}]{label:<9}[/] [#e6ebf2]{title}[/]"
+    if not detail:
+        return first_line
+    return f"{first_line}\n          [#7d8794]{detail}[/]"
 
 
 class BattleApp(App[None]):
@@ -198,17 +217,48 @@ class BattleApp(App[None]):
     .library-box { width: 92%; max-width: 120; height: 92%; }
     .wide-modal { width: 82; max-width: 94%; }
     .wide-modal #modal-list { height: 20; }
+    .compact-modal #modal-list { height: auto; min-height: 5; max-height: 14; }
     .help-modal { width: 104; max-width: 96%; }
     #lib-list { height: 1fr; border: round #2a3446; margin-top: 1; }
-    #modal-list { height: 15; border: round #2a3446; margin-top: 1; }
-    .modal-item { padding: 0 1; color: #c9d3e0; }
-    ListView:focus .modal-item { background: #2f3f5c; color: #ffffff; }
+    #modal-list {
+        height: 15;
+        border: round #2a3446;
+        background: #151922;
+        padding: 1 0;
+        margin-top: 1;
+    }
+    #modal-list .menu-entry {
+        width: 100%;
+        height: 1;
+        padding: 0 1;
+        border-left: thick #151922;
+        background: #151922;
+    }
+    #modal-list .menu-entry-two-line { height: 2; }
+    #modal-list .menu-entry-quiet { color: #717b89; }
+    #modal-list .menu-entry.-highlight {
+        border-left: thick #d2aa5a;
+        background: #242d3a;
+        color: #f2eee5;
+        text-style: bold;
+    }
+    .modal-item {
+        width: 100%;
+        padding: 0 1;
+        color: #c9d3e0;
+        background: transparent;
+    }
+    ListView:focus .modal-item { background: transparent; color: #f2eee5; }
     .modal-hint { margin-top: 1; color: #8a93a3; }
     .modal-help { margin: 0 0 1 0; }
     .scratchpad-box { width: 72; height: 24; }
     #scratchpad-input { height: 15; margin-top: 0; }
-    .startup-box { width: 68; }
-    .startup-box #modal-list { height: auto; min-height: 7; max-height: 16; }
+    .startup-box { width: 68; border: tall #526681; padding: 1 2; }
+    .startup-title { margin-bottom: 1; }
+    .startup-intro { margin-bottom: 1; }
+    .menu-kicker { color: #657184; text-style: bold; }
+    .startup-box #modal-list { height: auto; min-height: 10; max-height: 17; margin-top: 0; }
+    .startup-box #modal-list .menu-entry-two-line { height: 3; }
     .party-import-box { width: 82; height: 28; }
     #party-import-input { height: 18; margin-top: 0; }
     .modal-buttons { height: 3; align: right middle; }
@@ -259,6 +309,7 @@ class BattleApp(App[None]):
         Binding("f", "find", "Find"),
         Binding("e", "edit", "Edit"),
         Binding("p", "add_pc", "Add PC"),
+        Binding("P", "music", "Music"),
         Binding("ctrl+n", "new_encounter", "New encounter"),
         Binding("x", "remove", "Remove"),
         Binding("question_mark", "help", "Help"),
@@ -299,12 +350,13 @@ class BattleApp(App[None]):
         self._session_encounter_id: str | None = None
         self._session_encounter_name = ""
         self._remembering = False
+        self._music = music.MusicPlayer()
         self._setup()
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         """Keep the reference screen glanceable and mutation-free."""
         if self.view_mode in {"dm_screen", "party"} and action not in {
-            "combat_view", "dm_screen", "party_view", "toggle_view", "chat", "help", "quit", "release",
+            "combat_view", "dm_screen", "party_view", "toggle_view", "chat", "help", "music", "quit", "release",
         }:
             return False
         return True
@@ -347,6 +399,13 @@ class BattleApp(App[None]):
         self.call_after_refresh(self._refresh_all)
         self.call_after_refresh(self._scroll_to_selected)
         self.run_worker(self._boot_campaign())
+
+    def on_unmount(self) -> None:
+        self._music.stop()
+
+    def action_quit(self) -> None:
+        self._music.stop()
+        self.exit()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id != "chat-input" or not self._chat_mode or self._chat_busy:
@@ -777,26 +836,27 @@ class BattleApp(App[None]):
             options = [
                 (
                     "setup",
-                    "[bold #a8d0ff]PREPARE[/] · Set up a campaign\n"
-                    "  [dim]Name it and add the party[/]",
+                    folio_choice("PREPARE", "Set up a campaign", "Name it and add the party"),
                 ),
                 (
                     "sample",
-                    "[bold #e6ebf2]RUN[/] · Try a sample encounter\n"
-                    "  [dim]Learn Ward with a ready-to-run ambush[/]",
+                    folio_choice("RUN", "Try a sample encounter", "Learn Ward with a ready-to-run ambush"),
                 ),
                 (
                     "blank",
-                    "[bold #e6ebf2]RUN[/] · Start without a campaign\n"
-                    "  [dim]An empty encounter for quick table use[/]",
+                    folio_choice("RUN", "Start without a campaign", "An empty encounter for quick table use"),
                 ),
             ]
             if backup_count:
                 options.append((
                     "data",
-                    f"[bold #c9a227]RESTORE[/] · Ward data\n  [dim]{backup_count} backup{'s' if backup_count != 1 else ''} available[/]",
+                    folio_choice(
+                        "RESTORE",
+                        "Ward data",
+                        f"{backup_count} backup{'s' if backup_count != 1 else ''} available",
+                    ),
                 ))
-            options.append(("quit", "Quit"))
+            options.append(("quit", "[#717b89]Quit Ward[/]"))
             return (
                 options,
                 "Open your DM folio",
@@ -814,8 +874,11 @@ class BattleApp(App[None]):
             current_campaign = current.get("campaign") or "No campaign"
             options.append((
                 "resume",
-                f"[bold #a8d0ff]RESUME[/] · {escape(str(current.get('name') or 'Untitled encounter'))}\n"
-                f"  [dim]{escape(str(current_campaign))} · {count} creatures · round {escape(str(round_number))}[/]",
+                folio_choice(
+                    "RESUME",
+                    escape(str(current.get("name") or "Untitled encounter")),
+                    f"{escape(str(current_campaign))} · {count} creatures · round {escape(str(round_number))}",
+                ),
             ))
         if active is not None:
             party_size = len(self._campaign_party(active, data))
@@ -823,35 +886,50 @@ class BattleApp(App[None]):
             options.extend([
                 (
                     f"run:{active}",
-                    f"[bold #e6ebf2]RUN[/] · New encounter in {escape(active)}\n"
-                    f"  [dim]{party_size} adventurer{'s' if party_size != 1 else ''} · the current fight stays saved[/]",
+                    folio_choice(
+                        "RUN",
+                        f"New encounter in {escape(active)}",
+                        f"{party_size} adventurer{'s' if party_size != 1 else ''} · current fight stays saved",
+                    ),
                 ),
                 (
                     f"prepare:{active}",
-                    f"[bold #c9d3e0]PREPARE[/] · Open {escape(active)}\n"
-                    f"  [dim]{encounter_count} encounter{'s' if encounter_count != 1 else ''} · party, notes, and monster setups[/]",
+                    folio_choice(
+                        "PREPARE",
+                        f"Open {escape(active)}",
+                        f"{encounter_count} encounter{'s' if encounter_count != 1 else ''} · party, notes, and monster setups",
+                    ),
                 ),
             ])
         else:
             options.append((
                 "setup",
-                "[bold #a8d0ff]PREPARE[/] · Set up a campaign\n"
-                "  [dim]Keep a party, encounters, and session notes together[/]",
+                folio_choice(
+                    "PREPARE",
+                    "Set up a campaign",
+                    "Keep a party, encounters, and session notes together",
+                ),
             ))
         if len(campaigns) > 1:
             options.append((
                 "campaigns",
-                "[bold #c9d3e0]PREPARE[/] · Switch campaign\n"
-                f"  [dim]{len(campaigns)} saved · active: {escape(str(active))}[/]",
+                folio_choice(
+                    "PREPARE",
+                    "Switch campaign",
+                    f"{len(campaigns)} saved · active: {escape(str(active))}",
+                ),
             ))
         options.extend([
             (
                 "data",
-                "Ward data · back up or restore\n"
-                f"  [dim]{backup_count} backup{'s' if backup_count != 1 else ''} available[/]",
+                folio_choice(
+                    "WARD DATA",
+                    "Back up or restore",
+                    f"{backup_count} backup{'s' if backup_count != 1 else ''} available",
+                ),
             ),
-            ("blank", "RUN · Start without a campaign\n  [dim]An empty, remembered encounter[/]"),
-            ("quit", "Quit"),
+            ("blank", folio_choice("RUN", "Start without a campaign", "An empty, remembered encounter")),
+            ("quit", "[#717b89]Quit Ward[/]"),
         ])
         subtitle = (
             f"{escape(str(active))} · {len(self._campaign_party(active, data))} adventurers · choose what tonight needs"
@@ -1008,6 +1086,88 @@ class BattleApp(App[None]):
     def action_campaign(self) -> None:
         self.run_worker(self._campaign_flow())
 
+    def action_music(self) -> None:
+        self.run_worker(self._music_flow())
+
+    def _music_status(self) -> str:
+        source = self._music.source
+        if source is None:
+            return "Silent"
+        state = "Paused" if self._music.paused else "Playing"
+        return f"{state} · {source.name}"
+
+    async def _music_flow(self) -> None:
+        config: music.MusicConfig | None = None
+        if _offline_mode() and not self._music.active:
+            self._log("Music streaming is disabled while Ward is offline.", kind="warn")
+            return
+        if not _offline_mode():
+            try:
+                config_path = os.environ.get("WARD_MUSIC_CONFIG") or MUSIC_CONFIG_PATH
+                config = music.load_config(config_path)
+            except ValueError as exc:
+                if not self._music.active:
+                    self._log(str(exc), kind="warn")
+                    return
+                self._log(f"{escape(str(exc))}; current playback controls remain available.", kind="warn")
+            else:
+                self._music.configure(config.backend, config.volume)
+
+        options: list[tuple[str, str]] = []
+        current = self._music.source
+        if current is not None:
+            pause_verb = "RESUME" if self._music.paused else "PAUSE"
+            pause_title = escape(current.name)
+            options.extend([
+                ("pause", folio_choice(pause_verb, pause_title)),
+                ("stop", folio_choice("STOP", escape(current.name))),
+            ])
+        if config is not None:
+            options.extend(
+                (
+                    f"play:{index}",
+                    folio_choice(
+                        "PLAY",
+                        escape(source.name),
+                        escape(source.note) if source.note else "Configured stream",
+                    ),
+                )
+                for index, source in enumerate(config.sources)
+            )
+        options.append(("back", "[#717b89]Back to Ward[/]"))
+        picked = await self.push_screen(
+            ListModal(
+                f"MUSIC · {escape(self._music_status().upper())}",
+                options,
+                wide=True,
+                compact=True,
+            ),
+            wait_for_dismiss=True,
+        )
+        if picked == "pause":
+            try:
+                paused = self._music.toggle_pause()
+            except RuntimeError as exc:
+                self._log(f"Music could not be changed: {escape(str(exc))}", kind="warn")
+                return
+            self._log(f"Music {'paused' if paused else 'resumed'} · {escape(current.name)}.", kind="music")
+        elif picked == "stop":
+            name = current.name if current is not None else "stream"
+            self._music.stop()
+            self._log(f"Music stopped · {escape(name)}.", kind="music")
+        elif picked and picked.startswith("play:") and config is not None:
+            try:
+                source = config.sources[int(picked[5:])]
+                backend = self._music.play(source)
+            except (IndexError, ValueError, RuntimeError) as exc:
+                self._log(f"Music could not start: {escape(str(exc))}", kind="warn")
+                return
+            self._log(
+                f"Music playing · {escape(source.name)} via {escape(backend)}. "
+                "[bold]Shift+P[/] opens controls.",
+                kind="music",
+            )
+
     async def _campaign_flow(self) -> None:
         data = self._campaigns_read()
         active = data.get("active")
@@ -1035,34 +1195,51 @@ class BattleApp(App[None]):
                 snap = current.get("snapshot", {})
                 options.append((
                     f"resume:{current['id']}",
-                    f"[bold #a8d0ff]Resume · {escape(str(current.get('name')))}[/]\n"
-                    f"  [dim]Round {snap.get('round', 1)} · {len(snap.get('combatants', []))} creatures[/]",
+                    folio_choice(
+                        "RESUME",
+                        escape(str(current.get("name"))),
+                        f"Round {snap.get('round', 1)} · {len(snap.get('combatants', []))} creatures",
+                    ),
                 ))
             options.extend([
                 (
                     "new_encounter",
-                    "[bold #e6ebf2]RUN[/] · Start a new encounter\n  [dim]The current fight will remain saved[/]",
+                    folio_choice("RUN", "Start a new encounter", "The current fight will remain saved"),
                 ),
                 (
                     "encounters",
-                    f"[bold #c9d3e0]PREPARE[/] · Encounters · {len(records)} saved\n"
-                    f"  [dim]{len(records) - complete_count} open · {complete_count} complete[/]",
+                    folio_choice(
+                        "PREPARE",
+                        f"Encounters · {len(records)} saved",
+                        f"{len(records) - complete_count} open · {complete_count} complete",
+                    ),
                 ),
             ])
             if self._templates_read().get("templates"):
                 options.append((
                     "prepared",
-                    "[bold #c9d3e0]PREPARE[/] · Start from a monster setup\n  [dim]Combine a reusable setup with this party[/]",
+                    folio_choice(
+                        "PREPARE",
+                        "Start from a monster setup",
+                        "Combine a reusable setup with this party",
+                    ),
                 ))
             options.extend([
                 (
                     "details",
-                    f"Campaign details · {party_size} adventurer{'s' if party_size != 1 else ''}\n"
-                    f"  [dim]Party, notes, and lookup preference[/]",
+                    folio_choice(
+                        "CAMPAIGN",
+                        "Party and session details",
+                        f"{party_size} adventurer{'s' if party_size != 1 else ''} · notes · rules reference",
+                    ),
                 ),
-                ("data", "Ward data · back up or restore"),
-                ("switch", "Switch campaign\n  [dim]Choose another campaign without starting a fight[/]"),
-                ("blank", "RUN · Start without a campaign"),
+                ("music", folio_choice("MUSIC", "Soundtrack", self._music_status())),
+                ("data", folio_choice("WARD DATA", "Back up or restore")),
+                (
+                    "switch",
+                    folio_choice("SWITCH", "Campaign", "Choose another campaign without starting a fight"),
+                ),
+                ("blank", folio_choice("RUN", "Start without a campaign")),
             ])
             picked = await self.push_screen(
                 ListModal(
@@ -1099,6 +1276,8 @@ class BattleApp(App[None]):
                     return True
             elif picked == "details":
                 await self._campaign_details_flow(name)
+            elif picked == "music":
+                await self._music_flow()
             elif picked == "data":
                 if await self._ward_data_flow():
                     return True

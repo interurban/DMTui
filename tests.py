@@ -20,6 +20,7 @@ from battle import (
 from ddb import extract_combatant, fetch_character_data, parse_ddb_url, parse_ddb_urls
 import campaigns as campaign_store
 import encounter_store
+import music
 import openai_client
 import ward_backup
 
@@ -730,10 +731,86 @@ def test_shifted_letter_bindings_use_terminal_key_events():
     assert bindings["C"] == "campaign"
     assert bindings["I"] == "initiative_pass"
     assert bindings["M"] == "browse"
+    assert bindings["P"] == "music"
     assert bindings["R"] == "reset"
     assert bindings["U"] == "redo"
     assert "ctrl+s" not in bindings and "ctrl+l" not in bindings
     assert not any(binding.key.startswith("shift+") for binding in BattleApp.BINDINGS)
+
+
+def test_music_config_keeps_sources_swappable_and_validated():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "music.json")
+        with open(path, "w", encoding="utf-8") as config_file:
+            json.dump({
+                "backend": "ffplay",
+                "volume": 42,
+                "sources": [
+                    {"name": "Tavern", "url": "https://audio.example/tavern.m3u", "note": "Low chatter"},
+                    {"name": "Dungeon", "url": "https://audio.example/dungeon.mp3"},
+                ],
+            }, config_file)
+        config = music.load_config(path)
+        assert (config.backend, config.volume) == ("ffplay", 42)
+        assert [source.name for source in config.sources] == ["Tavern", "Dungeon"]
+        assert config.sources[0].url.endswith("tavern.m3u")
+
+        with open(path, "w", encoding="utf-8") as config_file:
+            json.dump({"backend": "browser", "sources": []}, config_file)
+        try:
+            music.load_config(path)
+        except ValueError as exc:
+            assert "backend" in str(exc).lower()
+        else:
+            raise AssertionError("unsupported music backends must be rejected")
+
+
+def test_music_player_uses_an_argument_list_and_owns_playback():
+    class FakeProcess:
+        def __init__(self):
+            self.done = False
+            self.signals = []
+            self.terminated = False
+
+        def poll(self):
+            return 0 if self.done else None
+
+        def send_signal(self, value):
+            self.signals.append(value)
+
+        def terminate(self):
+            self.terminated = True
+            self.done = True
+
+        def wait(self, timeout):
+            return 0
+
+        def kill(self):
+            self.done = True
+
+    calls = []
+    process = FakeProcess()
+
+    def fake_popen(command, **kwargs):
+        calls.append((command, kwargs))
+        return process
+
+    player = music.MusicPlayer(
+        backend="auto",
+        volume=37,
+        which=lambda name: "/usr/bin/mpv" if name == "mpv" else None,
+        popen=fake_popen,
+    )
+    source = music.MusicSource("Dungeon", "https://audio.example/dungeon.m3u")
+    assert player.play(source) == "mpv"
+    command, kwargs = calls[0]
+    assert command[-1] == source.url and "--volume=37" in command
+    assert "shell" not in kwargs and kwargs["start_new_session"] is True
+    assert player.source == source and player.active_backend == "mpv"
+    assert player.toggle_pause() is True
+    assert player.toggle_pause() is False
+    player.stop()
+    assert process.terminated and not player.active and player.source is None
 
 
 def test_saved_campaigns_put_active_first_and_keep_empty_campaigns():

@@ -107,6 +107,38 @@ Campaign details can hold a 2014 or 2024 **rules reference** preference. It
 guides optional lookups only; Ward does not enforce either ruleset or alter the
 encounter engine around it.
 
+### Soundtrack streaming
+
+Press `Shift+P`, or choose **Music** from the campaign folio, to start, pause,
+resume, stop, or change the table soundtrack. Ward stays silent until the DM
+starts a stream and stops its player when Ward exits.
+
+The tracked `ward/music_config.json` is the starter catalog and replaceable
+boundary:
+
+```json
+{
+  "backend": "auto",
+  "volume": 55,
+  "sources": [
+    {
+      "name": "Drone Zone",
+      "url": "https://somafm.com/m3u/dronezone.m3u",
+      "note": "Atmospheric textures with minimal beats · SomaFM"
+    }
+  ]
+}
+```
+
+Add, remove, or replace source entries without changing Python. `auto` prefers
+`mpv` and falls back to `ffplay`; set the backend explicitly to either name if
+needed. Set `WARD_MUSIC_CONFIG=/path/to/music.json` to keep a personal catalog
+outside the checkout or override the packaged default. Sources are passed to
+the player as arguments, never through a shell.
+The starter station is SomaFM's permanent external-player playlist for
+[Drone Zone](https://somafm.com/dronezone/directstreamlinks.html), offered for
+individual personal listening. Streaming is disabled with `WARD_OFFLINE=1`.
+
 ### DM Screen mode
 
 Press `Ctrl+2` to replace the four encounter panels with a fixed, glanceable
@@ -165,6 +197,7 @@ remembers the notes; `Esc` cancels.
 | `Shift+r` | reset the encounter (undoable) |
 | `i` | import a PC from a D&D Beyond URL |
 | `p` | add a PC from a name |
+| `Shift+p` | open soundtrack controls |
 | `e` | edit the selected creature (name, HP, AC, init mod, role, note, scores) |
 | `Shift+e` | ask for a catalog-only encounter suggestion with rough pressure guidance |
 | `f` | find a creature by name or map coordinate (`@B3`, `@AA1`) |
@@ -228,6 +261,8 @@ compatibility alias for older setups.
 - `campaigns.py` — campaign, party roster, lookup preference, and notes persistence.
 - `encounter_store.py` — named campaign encounters, status, current pointers,
   atomic persistence, and legacy migration.
+- `music.py` / `ward/music_config.json` — replaceable stream catalog and
+  external-player boundary.
 - `ward_backup.py` — portable Ward data backups and validated recovery.
 - `ward/` — the installed `ward` command and module entry point.
 - `ddb.py` — D&D Beyond character-service parsing (`extract_combatant`).

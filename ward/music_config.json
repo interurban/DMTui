@@ -1,0 +1,11 @@
+{
+  "backend": "auto",
+  "volume": 55,
+  "sources": [
+    {
+      "name": "Drone Zone",
+      "url": "https://somafm.com/m3u/dronezone.m3u",
+      "note": "Atmospheric textures with minimal beats · SomaFM"
+    }
+  ]
+}

@@ -10,6 +10,9 @@ Sprint log for Ward — a private, table-side tool for D&D Dungeon Masters
 - Startup and campaign navigation now use the real table moments: Resume, Run,
   and Prepare. Common turn actions dominate the live hint bar; specialist tools
   remain discoverable in the reorganized help screen and campaign folio.
+- Folio menus now use aligned action labels, content-sized rows, explicit
+  keyboard guidance, and a quiet bookmark-style selection marker instead of a
+  generic full-width blue highlight.
 - Campaign ruleset selection moved out of first-run setup and became an explicit
   lookup-reference preference. Ward does not claim to enforce 2014 or 2024
   rules.
@@ -21,6 +24,10 @@ Sprint log for Ward — a private, table-side tool for D&D Dungeon Masters
   validates the bundle and writes a safety backup before replacing live data.
 - Help and roadmap copy define the token map as a spatial note mirroring the
   physical table—not a virtual tabletop.
+- Optional soundtrack controls stream from the replaceable catalog in
+  `ward/music_config.json`, with `WARD_MUSIC_CONFIG` available as an external
+  override. Ward prefers `mpv`, falls back to `ffplay`, and owns the player
+  lifecycle so audio stops when the app exits.
 
 ## First-run folio + campaign ownership
 

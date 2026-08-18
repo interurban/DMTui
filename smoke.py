@@ -654,7 +654,7 @@ async def main() -> None:
         await _wait_modal(pilot, ListModal)
 
         # Ward can export all user-owned state from the campaign folio.
-        await pilot.press(*(["down"] * 5), "enter")
+        await pilot.press(*(["down"] * 6), "enter")
         await _wait_modal(pilot, ListModal)
         await pilot.press("enter")
         await _wait_modal(pilot, ListModal)
@@ -664,7 +664,7 @@ async def main() -> None:
 
         # Create a campaign from the current party, then switch into it.
         app.save_screenshot(os.path.join(SHOTS, "31-campaign-menu.png"))
-        await pilot.press(*(["down"] * 6), "enter")  # switch campaign
+        await pilot.press(*(["down"] * 7), "enter")  # switch campaign
         await _wait_modal(pilot, ListModal)
         await pilot.press("down", "down", "enter")  # create from party on table
         await _wait_modal(pilot, TextModal)
