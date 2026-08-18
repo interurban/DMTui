@@ -633,10 +633,10 @@ class HelpModal(ModalScreen[None]):
                     _help_column([
                         ("ADD AND ADJUST", [
                             ("m", "Quick monster"),
-                            ("Ctrl+B", "Monster library"),
-                            ("v", "Spellbook"),
+                            ("Shift+M", "Monster library"),
+                            ("b", "Spellbook"),
                             ("i / p", "Import / add PC"),
-                            ("e / x", "Edit / remove selected"),
+                            ("e / -", "Edit / remove selected"),
                             ("Ctrl+R", "Reset encounter"),
                         ]),
                         ("FOLIO AND TOOLS", [
@@ -647,7 +647,7 @@ class HelpModal(ModalScreen[None]):
                         ]),
                         ("NAVIGATE AND RECOVER", [
                             ("s / Ctrl+1–3", "Cycle / choose view"),
-                            ("f / /", "Find / quick lookup"),
+                            ("/", "Ask AI"),
                             ("/roll 2d6+4", "Roll locally"),
                             ("Ctrl+Z / Y", "Undo / redo"),
                             ("? / Ctrl+Q", "All keys / quit"),

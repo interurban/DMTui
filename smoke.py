@@ -294,7 +294,7 @@ async def main() -> None:
         duplicate = next(c for c in app.combatants if c.name.startswith("Bandit 2"))
         assert duplicate.hp == duplicate.max_hp and duplicate.init is None and not duplicate.conditions
         app._sel = duplicate
-        await pilot.press("x")
+        await pilot.press("minus")
         await pilot.pause()
         await pilot.press("enter")
         await pilot.pause()
@@ -311,7 +311,7 @@ async def main() -> None:
         # remove the Bandit with confirmation
         app._sel = bandit
         await pilot.pause()
-        await pilot.press("x")
+        await pilot.press("minus")
         await pilot.pause()
         app.save_screenshot(os.path.join(SHOTS, "09-remove-confirm.png"))
         await pilot.press("enter")      # confirm the removal
@@ -763,10 +763,10 @@ async def main() -> None:
         await pilot.pause()
         assert len(app.combatants) == 0, len(app.combatants)
 
-        # Monster library browser (Ctrl+B): type a filter, Enter adds the match.
+        # Monster library browser (Shift+M): type a filter, Enter adds the match.
         # "goblin shaman" is built-in-only (absent from the SRD cache), so it is
         # always a single match regardless of whether SRD data is present.
-        await pilot.press("ctrl+b")
+        await pilot.press("shift+m")
         await pilot.pause()
         await pilot.press(*tuple("goblin shaman"))
         await pilot.pause()
@@ -784,9 +784,9 @@ async def main() -> None:
         await pilot.pause()
         assert len(app.combatants) == 0, len(app.combatants)
 
-        # spellbook (v): add an SRD spell to the selected creature. Guarded so
+        # spellbook (b): add an SRD spell to the selected creature. Guarded so
         # it still passes in a fresh checkout with no SRD spell cache present.
-        await pilot.press("ctrl+b")
+        await pilot.press("shift+m")
         await pilot.pause()
         await pilot.press(*tuple("goblin shaman"))
         await pilot.pause()
@@ -797,7 +797,7 @@ async def main() -> None:
         await pilot.press("up")  # select the creature (_sel was None before)
         await pilot.pause()
         assert app._sel is not None, "expected a selected creature"
-        await pilot.press("v")
+        await pilot.press("b")
         await pilot.pause()
         # wait for the spellbook worker to mount the screen (avoids a race)
         for _ in range(10):

@@ -40,6 +40,11 @@ Sprint log for Ward — a private, table-side tool for D&D Dungeon Masters
   monster/spell browser plumbing, removed unused imports and a repeated D&D
   Beyond inventory walk, and replaced the stale review diary with a current
   file-by-file audit.
+- Table shortcuts now follow their visible nouns: `m` quick-adds a monster,
+  `Shift+M` opens the Monster Library, `b` opens the Spellbook, and `-` removes
+  the selected creature (while remaining a negative sign during initiative
+  entry). The redundant Find flow was removed, and `/` is labeled honestly as
+  Ask AI. `Ctrl+M` remains unavailable because terminals encode it as Enter.
 
 ## Reliability bug hunt — August 2026
 

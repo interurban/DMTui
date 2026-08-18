@@ -91,19 +91,6 @@ def _offline_mode() -> bool:
     return bool(os.environ.get("WARD_OFFLINE") or os.environ.get("VTT_OFFLINE"))
 
 
-def _parse_coord(s: str) -> tuple[int, int] | None:
-    """Parse an Excel-style map coordinate like 'B3' or 'AA1' -> (x, y)."""
-    s = s.strip().upper()
-    i = 0
-    while i < len(s) and s[i].isalpha():
-        i += 1
-    if i == 0 or not s[i:].isdigit():
-        return None
-    x = 0
-    for ch in s[:i]:
-        x = x * 26 + (ord(ch) - ord("A") + 1)
-    return (x - 1, int(s[i:]) - 1)
-
 LOG_COLORS = {
     "info": "#c9d3e0",
     "warn": "#d95841",
@@ -390,29 +377,27 @@ class BattleApp(App[None]):
         Binding("7", "hp_digit(7)", "7"),
         Binding("8", "hp_digit(8)", "8"),
         Binding("9", "hp_digit(9)", "9"),
-        Binding("minus", "init_minus", "Negative initiative"),
+        Binding("minus", "remove_or_negative", "Remove"),
         Binding("backspace", "hp_backspace", "Backspace"),
         Binding("c", "condition", "Condition"),
         Binding("ctrl+o", "campaign", "Campaign folio"),
         Binding("ctrl+e", "encounter_templates", "Prepared encounters"),
         Binding("ctrl+g", "ai_encounter", "Generate encounter"),
         Binding("m", "monster", "Quick monster"),
-        Binding("ctrl+b", "browse", "Monster library"),
-        Binding("v", "spell", "Spellbook"),
+        Binding("shift+m", "browse", "Monster library"),
+        Binding("b", "spell", "Spellbook"),
         Binding("i", "import_pc", "Import PC"),
-        Binding("f", "find", "Find"),
         Binding("e", "edit", "Edit"),
         Binding("p", "add_pc", "Add PC"),
         Binding("ctrl+k", "music", "Music"),
         Binding("ctrl+n", "new_encounter", "New encounter"),
-        Binding("x", "remove", "Remove"),
         Binding("question_mark", "help", "Help"),
         Binding("escape", "release", "Drop"),
         Binding("ctrl+z", "undo", "Undo"),
         Binding("ctrl+y", "redo", "Redo"),
         Binding("s", "toggle_view", "Switch view"),
         Binding("ctrl+q", "quit", "Quit"),
-        Binding("slash", "chat", "Chat"),
+        Binding("slash", "chat", "Ask AI"),
     ]
 
     def __init__(self) -> None:
@@ -488,7 +473,7 @@ class BattleApp(App[None]):
                 yield Static("", id="detail-status")
         with Container(id="message"):
             yield Static("", id="message-hints")
-            yield Input(placeholder="Ask the DM assistant…", id="chat-input")
+            yield Input(placeholder="Ask AI about the encounter or rules…", id="chat-input")
 
     def on_mount(self) -> None:
         self._refresh_all()
@@ -542,7 +527,7 @@ class BattleApp(App[None]):
                     hint_line(
                         ("s", "switch view"),
                         ("ctrl+1", "combat"),
-                        ("/", "lookup"),
+                        ("/", "ask AI"),
                         ("?", "all keys"),
                     )
                 )
@@ -553,7 +538,7 @@ class BattleApp(App[None]):
                         ("ctrl+o", "campaign"),
                         ("ctrl+n", "new encounter"),
                         ("ctrl+k", "music"),
-                        ("/", "lookup"),
+                        ("/", "ask AI"),
                         ("?", "all keys"),
                     )
                 )
@@ -634,7 +619,7 @@ class BattleApp(App[None]):
             rows.append(f"Selected: {c.name}: {c.hp}/{c.max_hp} HP, AC {c.ac}, init {init}, conditions {conditions}")
         recent = [
             text for text, kind, in_log in self._messages
-            if in_log and kind not in {"select", "dm"} and not text.startswith(("CHAT >", "DM:"))
+            if in_log and kind not in {"select", "dm"} and not text.startswith(("ASK AI >", "AI:"))
         ][-3:]
         context = (
             f"Rules reference (guidance only): {self._campaign_ruleset()}\n"
@@ -662,13 +647,13 @@ class BattleApp(App[None]):
         return context
 
     async def _answer_chat(self, question: str) -> None:
-        self._log(f"CHAT > {escape(question)}", kind="select")
+        self._log(f"ASK AI > {escape(question)}", kind="select")
         try:
             answer = await run_in_thread(openai_client.chat, question, self._chat_context(question))
         except Exception as exc:
-            self._log(f"CHAT ERROR: {escape(str(exc))}", kind="warn")
+            self._log(f"AI ERROR: {escape(str(exc))}", kind="warn")
         else:
-            self._log(f"DM: {escape(answer)}", kind="dm")
+            self._log(f"AI: {escape(answer)}", kind="dm")
         finally:
             self._exit_chat_mode()
 
@@ -2592,12 +2577,12 @@ class BattleApp(App[None]):
 
     def _log_status_text(self) -> Text:
         if self.view_mode != "combat":
-            return hint_line(("/", "lookup"), ("?", "all keys"))
+            return hint_line(("/", "ask AI"), ("?", "all keys"))
         return hint_line(("ctrl+z", "undo"), ("ctrl+y", "redo"))
 
     def _detail_status_text(self) -> Text:
         if self.view_mode != "combat":
-            return hint_line(("/", "lookup"), ("?", "all keys"))
+            return hint_line(("/", "ask AI"), ("?", "all keys"))
         return hint_line(
             ("a", "attack"), ("d", "damage"), ("h", "heal"), ("c", "condition")
         )
@@ -2813,10 +2798,15 @@ class BattleApp(App[None]):
         self._hp_entry = None
         self._refresh_all()
 
-    def action_init_minus(self) -> None:
-        if self._init_entry == "" and self._sel is not None:
-            self._init_entry = "-"
-            self._refresh_all()
+    def action_remove_or_negative(self) -> None:
+        if self._init_entry is not None:
+            if self._init_entry == "" and self._sel is not None:
+                self._init_entry = "-"
+                self._refresh_all()
+            return
+        if self._hp_entry is not None:
+            return
+        self.action_remove()
 
     def action_initiative_pass(self) -> None:
         pending = [c for c in self.combatants if c.kind == "PC" and c.init is None]
@@ -3044,42 +3034,6 @@ class BattleApp(App[None]):
             f"{escape(c.name)} casts {escape(str(res['name']))} on {escape(target.name)}.{save_note}",
             kind="monster",
         )
-
-    # -- find a combatant --------------------------------------------------------
-
-    def action_find(self) -> None:
-        self.run_worker(self._find_flow())
-
-    async def _find_flow(self) -> None:
-        query = await self.push_screen(
-            TextModal("FIND COMBATANT", "name or @coordinate", confirm="Find"),
-            wait_for_dismiss=True,
-        )
-        if not query or not self.combatants:
-            return
-        q = query.strip()
-        if q.startswith("@"):
-            pos = _parse_coord(q[1:])
-            if pos is not None:
-                x, y = pos
-                target = next((m for m in self.combatants if m.x == x and m.y == y), None)
-                if target is not None:
-                    self._sel = target
-                    self._refresh_all()
-                    self._scroll_to_selected()
-                    self._log(f"Found {escape(target.name)} at {coord_name(x, y)}.", kind="select")
-                    return
-            self._log(f"No combatant at {escape(q.upper())} on the map.", kind="warn")
-            return
-        ql = q.lower()
-        for m in self.combatants:
-            if ql in m.name.lower() or ql in m.role.lower():
-                self._sel = m
-                self._refresh_all()
-                self._scroll_to_selected()
-                self._log(f"Found {escape(m.name)} — {coord_name(m.x, m.y)}.", kind="select")
-                return
-        self._log(f"No combatant matches {escape(repr(q))}.", kind="warn")
 
     # -- import PC from D&D Beyond ---------------------------------------------
 

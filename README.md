@@ -25,7 +25,7 @@ command and module remain compatibility aliases. Running
 documents both staff code-review passes and every fix that came out of them.
 `ROADMAP.md` tracks the prioritized next features and explicit non-goals.
 
-The optional `/` lookup and `Ctrl+G` encounter assistant use the OpenAI model
+The optional `/` Ask AI prompt and `Ctrl+G` encounter assistant use the OpenAI model
 configured in `llm_config.json`. For local secret storage, copy `.env.example` to `.env`
 and add your key:
 
@@ -196,10 +196,10 @@ symbol shortcuts stay explicit. Press `?` for the complete reference.
 | `d` / `h` | damage / heal (amount prompt) |
 | `0`–`9` / `Backspace` | type or edit an inline damage/healing amount |
 | `c` | toggle a condition |
-| `m` / `Ctrl+B` | quick add / browse the searchable monster library |
-| `v` | spellbook — browse the SRD and add a spell to the selected creature |
-| `x` | remove the selected creature (asks first) |
-| `r` / `t` | roll monster initiative / set a creature's initiative (`-` enters a negative value) |
+| `m` / `Shift+M` | quick add / browse the searchable monster library |
+| `b` | spellbook — browse the SRD and add a spell to the selected creature |
+| `-` | remove the selected creature (asks first); enters a negative value while editing initiative |
+| `r` / `t` | roll monster initiative / set a creature's initiative |
 | `Ctrl+T` | enter initiative for each unrolled PC in sequence |
 | `+` | duplicate the selected monster at full HP |
 | `Ctrl+R` | reset the encounter (undoable) |
@@ -208,14 +208,13 @@ symbol shortcuts stay explicit. Press `?` for the complete reference.
 | `Ctrl+K` | open soundtrack controls |
 | `e` | edit the selected creature (name, HP, AC, init mod, role, note, scores) |
 | `Ctrl+G` | ask for a catalog-only encounter suggestion with rough pressure guidance |
-| `f` | find a creature by name or map coordinate (`@B3`, `@AA1`) |
 | `Ctrl+Z` / `Ctrl+Y` | undo / redo |
 | `s` | cycle Combat → DM Screen → Party Reference |
 | `Ctrl+1` / `Ctrl+2` / `Ctrl+3` | open Combat / DM Screen / Party Reference |
 | `Ctrl+O` | open the active campaign, party, encounters, and notes |
 | `Ctrl+N` | name and start another encounter; keep the current one saved |
 | `Ctrl+E` | save/start prepared encounters |
-| `/` | ask the OpenAI DM assistant |
+| `/` | Ask AI about the encounter or rules |
 | `/roll 2d6+4` | roll dice locally without using OpenAI |
 | `Ctrl+Q` / `?` | quit / help |
 
@@ -249,7 +248,7 @@ stay together.
 
 ## Open5e SRD content
 
-Press `Ctrl+B` to open the monster library and `v` to open the spellbook. Both merge
+Press `Shift+M` to open the monster library and `b` to open the spellbook. Both merge
 the hand-authored templates with the official D&D 5e **System Reference
 Document**, fetched from [Open5e](https://open5e.com) on first use and cached to
 `.cache/open5e/`. The first open fetches in the background (needs network, once);
@@ -257,6 +256,10 @@ subsequent opens are instant. SRD creatures/spells are converted into the same
 statblocks the rest of the app uses, so they're indistinguishable in play. Set
 `WARD_OFFLINE=1` to disable all network fetches. `VTT_OFFLINE` remains a
 compatibility alias for older setups.
+
+`Ctrl+M` cannot be a distinct shortcut in a traditional terminal because it
+emits the same control character as Enter. Ward uses `Shift+M` for the full
+library so attack and confirmation remain reliable.
 
 - `srd.py` is the generic client — `fetch_raw` / `get_collection` paginate and
   cache any Open5e v2 collection, so other content (magic items, conditions, …)

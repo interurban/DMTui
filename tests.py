@@ -786,7 +786,7 @@ def test_openai_shared_response_errors_are_normalized():
                 raise AssertionError(f"expected {expected!r} error")
 
 
-def test_modified_bindings_use_one_ctrl_only_grammar():
+def test_shortcuts_use_terminal_safe_mnemonics():
     from app import BattleApp
 
     bindings = {binding.key: binding.action for binding in BattleApp.BINDINGS}
@@ -794,7 +794,6 @@ def test_modified_bindings_use_one_ctrl_only_grammar():
         "ctrl+1": "combat_view",
         "ctrl+2": "dm_screen",
         "ctrl+3": "party_view",
-        "ctrl+b": "browse",
         "ctrl+e": "encounter_templates",
         "ctrl+g": "ai_encounter",
         "ctrl+k": "music",
@@ -808,11 +807,11 @@ def test_modified_bindings_use_one_ctrl_only_grammar():
     }
     assert "q" not in bindings
     assert "ctrl+i" not in bindings and "ctrl+m" not in bindings  # terminal aliases for Tab / Enter
-    assert not any(
-        key.startswith("shift+") or (len(key) == 1 and key.isupper())
-        for binding in BattleApp.BINDINGS
-        for key in binding.key.split(",")
-    )
+    assert bindings["m"] == "monster"
+    assert bindings["shift+m"] == "browse"
+    assert bindings["b"] == "spell"
+    assert bindings["minus"] == "remove_or_negative"
+    assert "f" not in bindings and "v" not in bindings and "x" not in bindings
 
 
 def test_cancelled_encounter_generation_does_not_reopen_or_double_dismiss():
@@ -1511,10 +1510,15 @@ def test_negative_initiative_can_be_entered():
     app._refresh_all = lambda: None
     app._log = lambda *_args, **_kwargs: None
     app.action_set_init()
-    app.action_init_minus()
+    app.action_remove_or_negative()
     app.action_hp_digit(4)
     app._finish_hp_entry()
     assert creature.init == -4
+
+    removed = []
+    app.action_remove = lambda: removed.append(creature)
+    app.action_remove_or_negative()
+    assert removed == [creature]
 
 
 def test_map_shrink_reflows_tokens_into_visible_unique_cells():
