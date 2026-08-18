@@ -10,6 +10,22 @@ from textual.widgets import Button, Input, Label, ListItem, ListView, Static, Te
 from rich.markup import escape
 
 
+def folio_choice(verb: str, title: str, detail: str = "") -> str:
+    """Align a menu choice like a labelled entry in the DM's folio."""
+    accents = {
+        "RESUME": "#a8d0ff",
+        "RUN": "#e6ebf2",
+        "PREPARE": "#9fb0c6",
+        "RESTORE": "#d2aa5a",
+        "PLAY": "#d2aa5a",
+    }
+    label = verb.upper()
+    first_line = f"[bold {accents.get(label, '#c9d3e0')}]{label:<9}[/] [#e6ebf2]{title}[/]"
+    if not detail:
+        return first_line
+    return f"{first_line}\n          [#7d8794]{detail}[/]"
+
+
 def _menu_entry(key: str, label: str) -> ListItem:
     """Build a folio-style menu row with room for an optional detail line."""
     classes = ["menu-entry"]
@@ -342,13 +358,8 @@ class ScratchpadModal(ModalScreen[str | None]):
         self.dismiss(None)
 
 
-class MonsterLibrary(ModalScreen[None]):
-    """Large, searchable monster picker — the DM's add-monster UI.
-
-    Merges the hand-authored templates (tagged [built-in]) with the Open5e SRD
-    library (tagged [SRD]). Type to filter; Enter/a on a row adds it and keeps
-    the picker open so several monsters can be dropped in mid-fight without
-    re-opening. `f` pulls the SRD library on demand (needs network, one-time)."""
+class _SearchLibrary(ModalScreen[None]):
+    """Shared keyboard and list plumbing for Ward's searchable SRD pickers."""
 
     BINDINGS = [
         ("escape", "cancel", "Close"),
@@ -356,6 +367,73 @@ class MonsterLibrary(ModalScreen[None]):
         ("a", "add_selected", "Add"),
         ("f", "fetch_srd", "Fetch SRD"),
     ]
+    _fetch_message = "Fetching SRD…"
+
+    def on_mount(self) -> None:
+        self.query_one("#lib-search", Input).focus()
+        self._rebuild()
+
+    def _entries(self) -> list[tuple[str, object]]:
+        raise NotImplementedError
+
+    def _source_status(self) -> str:
+        raise NotImplementedError
+
+    def _rebuild(self) -> None:
+        entries = self._entries()
+        self._current = entries
+        library = self.query_one("#lib-list", ListView)
+        library.clear()
+        for label, _ in entries:
+            library.append(ListItem(Label(label, classes="modal-item")))
+        library.index = 0 if entries else None
+        total = len(entries)
+        self.query_one("#lib-status", Static).update(
+            f"[dim]{total} match{'es' if total != 1 else ''} · {self._source_status()}[/]"
+        )
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id == "lib-search":
+            self._rebuild()
+
+    def on_input_submitted(self, _: Input.Submitted) -> None:
+        if len(self._current) == 1:
+            self._add(self._current[0][1])
+        elif self._current:
+            self.query_one("#lib-list", ListView).focus()
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        index = event.list_view.index
+        if index is not None and 0 <= index < len(self._current):
+            self._add(self._current[index][1])
+
+    def action_add_selected(self) -> None:
+        index = self.query_one("#lib-list", ListView).index
+        if index is not None and 0 <= index < len(self._current):
+            self._add(self._current[index][1])
+        elif len(self._current) == 1:
+            self._add(self._current[0][1])
+
+    def action_fetch_srd(self) -> None:
+        self.query_one("#lib-status", Static).update(f"[dim #a8d0ff]{self._fetch_message}[/]")
+        try:
+            self._fetch_fn()
+        except Exception as exc:
+            self.query_one("#lib-status", Static).update(f"[dim #d95841]Fetch failed: {exc}[/]")
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+class MonsterLibrary(_SearchLibrary):
+    """Large, searchable monster picker — the DM's add-monster UI.
+
+    Merges the hand-authored templates (tagged [built-in]) with the Open5e SRD
+    library (tagged [SRD]). Type to filter; Enter/a on a row adds it and keeps
+    the picker open so several monsters can be dropped in mid-fight without
+    re-opening. `f` pulls the SRD library on demand (needs network, one-time)."""
+
+    _fetch_message = "Fetching SRD monsters…"
 
     def __init__(self, builtins: dict, srd: list[dict] | None, add_fn, fetch_fn) -> None:
         super().__init__()
@@ -376,10 +454,6 @@ class MonsterLibrary(ModalScreen[None]):
                 classes="modal-hint",
             )
 
-    def on_mount(self) -> None:
-        self.query_one("#lib-search", Input).focus()
-        self._rebuild()
-
     def _entries(self) -> list[tuple[str, tuple[str, object]]]:
         q = self.query_one("#lib-search", Input).value.strip().lower()
         out: list[tuple[str, tuple[str, object]]] = []
@@ -395,44 +469,8 @@ class MonsterLibrary(ModalScreen[None]):
                 out.append((label, ("srd", m)))
         return out
 
-    def _rebuild(self) -> None:
-        entries = self._entries()
-        self._current = entries
-        lv = self.query_one("#lib-list", ListView)
-        lv.clear()
-        for label, _ in entries:
-            lv.append(ListItem(Label(label, classes="modal-item")))
-        lv.index = 0 if entries else None
-        total = len(entries)
-        src = "built-ins" + (f" + {len(self._srd)} SRD" if self._srd else " (SRD not loaded — press f)")
-        self.query_one("#lib-status", Static).update(
-            f"[dim]{total} match{'es' if total != 1 else ''} · {src}[/]"
-        )
-
-    def on_input_changed(self, event: Input.Changed) -> None:
-        if event.input.id == "lib-search":
-            self._rebuild()
-
-    def on_input_submitted(self, _: Input.Submitted) -> None:
-        if not self._current:
-            return
-        if len(self._current) == 1:
-            self._add(self._current[0][1])
-        else:
-            self.query_one("#lib-list", ListView).focus()
-
-    def on_list_view_selected(self, event: ListView.Selected) -> None:
-        idx = event.list_view.index
-        if idx is not None and 0 <= idx < len(self._current):
-            self._add(self._current[idx][1])
-
-    def action_add_selected(self) -> None:
-        lv = self.query_one("#lib-list", ListView)
-        idx = lv.index
-        if idx is not None and 0 <= idx < len(self._current):
-            self._add(self._current[idx][1])
-        elif len(self._current) == 1:
-            self._add(self._current[0][1])
+    def _source_status(self) -> str:
+        return "built-ins" + (f" + {len(self._srd)} SRD" if self._srd else " (SRD not loaded — press f)")
 
     def _add(self, payload: tuple[str, object]) -> None:
         try:
@@ -448,35 +486,20 @@ class MonsterLibrary(ModalScreen[None]):
             if lv.index is None and self._current:
                 lv.index = 0
 
-    def action_fetch_srd(self) -> None:
-        self.query_one("#lib-status", Static).update("[dim #a8d0ff]Fetching SRD monsters…[/]")
-        try:
-            self._fetch_fn()
-        except Exception:
-            pass
-
     def update_srd(self, data: list[dict]) -> None:
         """Swap in freshly fetched SRD data and refresh the list."""
         self._srd = list(data or [])
         self._rebuild()
 
-    def action_cancel(self) -> None:
-        self.dismiss(None)
 
-
-class SpellBrowser(ModalScreen[None]):
+class SpellBrowser(_SearchLibrary):
     """Searchable SRD spellbook — adds an Open5e spell to the selected creature.
 
     Mirrors MonsterLibrary's large, keep-open UX: type to filter, Enter/a adds
     the spell to the selected combatant's `spells` list (where it becomes
     usable in the attack flow), `f` fetches the SRD spell list on demand."""
 
-    BINDINGS = [
-        ("escape", "cancel", "Close"),
-        ("enter", "add_selected", "Add (stays open)"),
-        ("a", "add_selected", "Add"),
-        ("f", "fetch_srd", "Fetch SRD"),
-    ]
+    _fetch_message = "Fetching SRD spells…"
 
     def __init__(self, spells: list[dict] | None, add_fn, fetch_fn, warn_fn) -> None:
         super().__init__()
@@ -497,10 +520,6 @@ class SpellBrowser(ModalScreen[None]):
                 classes="modal-hint",
             )
 
-    def on_mount(self) -> None:
-        self.query_one("#lib-search", Input).focus()
-        self._rebuild()
-
     def _entries(self) -> list[tuple[str, dict]]:
         q = self.query_one("#lib-search", Input).value.strip().lower()
         out: list[tuple[str, dict]] = []
@@ -513,36 +532,8 @@ class SpellBrowser(ModalScreen[None]):
                 out.append((label, m))
         return out
 
-    def _rebuild(self) -> None:
-        entries = self._entries()
-        self._current = entries
-        lv = self.query_one("#lib-list", ListView)
-        lv.clear()
-        for label, _ in entries:
-            lv.append(ListItem(Label(label, classes="modal-item")))
-        lv.index = 0 if entries else None
-        total = len(entries)
-        src = f"{len(self._spells)} SRD spells" if self._spells else "SRD not loaded — press f"
-        self.query_one("#lib-status", Static).update(
-            f"[dim]{total} match{'es' if total != 1 else ''} · {src}[/]"
-        )
-
-    def on_input_changed(self, event: Input.Changed) -> None:
-        if event.input.id == "lib-search":
-            self._rebuild()
-
-    def on_input_submitted(self, _: Input.Submitted) -> None:
-        if not self._current:
-            return
-        if len(self._current) == 1:
-            self._add(self._current[0][1])
-        else:
-            self.query_one("#lib-list", ListView).focus()
-
-    def on_list_view_selected(self, event: ListView.Selected) -> None:
-        idx = event.list_view.index
-        if idx is not None and 0 <= idx < len(self._current):
-            self._add(self._current[idx][1])
+    def _source_status(self) -> str:
+        return f"{len(self._spells)} SRD spells" if self._spells else "SRD not loaded — press f"
 
     def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
         idx = event.list_view.index
@@ -550,14 +541,6 @@ class SpellBrowser(ModalScreen[None]):
             m = self._current[idx][1]
             info = f"{m.get('name')} · L{m.get('level', 0)} {m.get('school', '')} · {m.get('casting_time', '')} · {m.get('range', '')}"
             self.query_one("#lib-status", Static).update(f"[dim]{info}[/]")
-
-    def action_add_selected(self) -> None:
-        lv = self.query_one("#lib-list", ListView)
-        idx = lv.index
-        if idx is not None and 0 <= idx < len(self._current):
-            self._add(self._current[idx][1])
-        elif len(self._current) == 1:
-            self._add(self._current[0][1])
 
     def _add(self, fields: dict) -> None:
         try:
@@ -576,20 +559,9 @@ class SpellBrowser(ModalScreen[None]):
         if lv.index is None and self._current:
             lv.index = 0
 
-    def action_fetch_srd(self) -> None:
-        self.query_one("#lib-status", Static).update("[dim #a8d0ff]Fetching SRD spells…[/]")
-        try:
-            self._fetch_fn()
-        except Exception:
-            pass
-
     def update_srd(self, data: list[dict]) -> None:
         self._spells = list(data or [])
         self._rebuild()
-
-    def action_cancel(self) -> None:
-        self.dismiss(None)
-
 
 class HelpModal(ModalScreen[None]):
     BINDINGS = [("escape", "cancel", "Cancel"), ("enter", "cancel", "Cancel")]

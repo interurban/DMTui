@@ -9,6 +9,7 @@ from typing import Any
 
 import campaigns as campaign_store
 import encounter_store
+from persistence import write_json_atomic
 
 
 BACKUP_FORMAT = "ward-data-backup"
@@ -65,17 +66,7 @@ def write_backup(directory: str, campaigns: dict, encounters: dict, templates: d
     bundle = build_bundle(campaigns, encounters, templates, created_at=timestamp.isoformat(timespec="seconds"))
     filename = f"ward-backup-{timestamp.strftime('%Y%m%d-%H%M%S-%f')}.json"
     path = os.path.join(directory, filename)
-    temp_path = f"{path}.tmp"
-    try:
-        with open(temp_path, "w", encoding="utf-8") as backup_file:
-            json.dump(bundle, backup_file, indent=2)
-        os.replace(temp_path, path)
-    except Exception:
-        try:
-            os.unlink(temp_path)
-        except OSError:
-            pass
-        raise
+    write_json_atomic(path, bundle, indent=2)
     return path
 
 
@@ -92,17 +83,7 @@ def list_backups(directory: str) -> list[str]:
 
 
 def write_templates(path: str, templates: dict) -> None:
-    temp_path = f"{path}.tmp"
-    try:
-        with open(temp_path, "w", encoding="utf-8") as template_file:
-            json.dump(normalize_templates(templates), template_file, indent=2)
-        os.replace(temp_path, path)
-    except Exception:
-        try:
-            os.unlink(temp_path)
-        except OSError:
-            pass
-        raise
+    write_json_atomic(path, normalize_templates(templates), indent=2)
 
 
 def restore_backup(path: str, campaign_path: str, encounter_path: str, template_path: str) -> dict:

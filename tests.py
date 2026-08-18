@@ -22,6 +22,7 @@ import campaigns as campaign_store
 import encounter_store
 import music
 import openai_client
+import persistence
 import ward_backup
 
 
@@ -811,6 +812,24 @@ def test_music_player_uses_an_argument_list_and_owns_playback():
     assert player.toggle_pause() is False
     player.stop()
     assert process.terminated and not player.active and player.source is None
+
+
+def test_atomic_json_write_preserves_existing_data_on_failure():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "state.json")
+        persistence.write_json_atomic(path, {"state": "before"}, indent=2)
+
+        with mock.patch.object(persistence.json, "dump", side_effect=RuntimeError("broken encoder")):
+            try:
+                persistence.write_json_atomic(path, {"state": "after"}, indent=2)
+            except RuntimeError as exc:
+                assert "broken encoder" in str(exc)
+            else:
+                raise AssertionError("a failed JSON write must propagate its error")
+
+        with open(path, encoding="utf-8") as state_file:
+            assert json.load(state_file) == {"state": "before"}
+        assert not os.path.exists(f"{path}.tmp")
 
 
 def test_saved_campaigns_put_active_first_and_keep_empty_campaigns():

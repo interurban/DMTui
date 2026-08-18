@@ -28,6 +28,7 @@ py-modules = [
     "music",
     "modals",
     "openai_client",
+    "persistence",
     "srd",
     "ward_backup",
     "widgets",

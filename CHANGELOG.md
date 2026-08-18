@@ -28,6 +28,10 @@ Sprint log for Ward — a private, table-side tool for D&D Dungeon Masters
   `ward/music_config.json`, with `WARD_MUSIC_CONFIG` available as an external
   override. Ward prefers `mpv`, falls back to `ffplay`, and owns the player
   lifecycle so audio stops when the app exits.
+- The maintenance pass consolidated four atomic JSON writers, deduplicated the
+  monster/spell browser plumbing, removed unused imports and a repeated D&D
+  Beyond inventory walk, and replaced the stale review diary with a current
+  file-by-file audit.
 
 ## First-run folio + campaign ownership
 

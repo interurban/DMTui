@@ -109,7 +109,9 @@ def fetch_character_data(character_id: int) -> dict:
             ) from exc
         try:
             detail = json.loads(exc.read().decode("utf-8"))
-            data = detail.get("data") if isinstance(detail, dict) else None
+            if not isinstance(detail, dict):
+                detail = {}
+            data = detail.get("data")
             message = (
                 detail.get("message")
                 or (data.get("serverMessage") if isinstance(data, dict) else None)
@@ -118,7 +120,7 @@ def fetch_character_data(character_id: int) -> dict:
             code = data.get("errorCode") if isinstance(data, dict) else None
             if code:
                 message = f"{message} ({code})"
-        except Exception:
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
             message = str(exc)
         raise ValueError(f"D&D Beyond returned {exc.code}: {message}") from exc
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
@@ -205,14 +207,6 @@ def extract_combatant(character_id: int, data: dict) -> Combatant:
             ac = _int(item_ac)
             dex_cap = {1: None, 2: 2, 3: 0}[atype]
             wearing_armor = True
-    for item in inventory:
-        if not item.get("equipped"):
-            continue
-        defn = item.get("definition")
-        if not isinstance(defn, dict):
-            continue
-        item_ac = defn.get("armorClass")
-        atype = _int(defn.get("armorTypeId"), -1)
         iname = (defn.get("name") or "").lower()
         if (atype == 4 or "shield" in iname) and item_ac:
             shield_bonus += _int(item_ac)

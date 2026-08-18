@@ -19,8 +19,7 @@ import re
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Container, Vertical, VerticalScroll
-from textual.css.query import NoMatches
+from textual.containers import Container, VerticalScroll
 from textual.widgets import Header, Input, Static
 from rich.markup import escape
 from rich.text import Text
@@ -50,7 +49,22 @@ import music
 import openai_client
 import ward_backup
 from ddb import ABILITY_NAMES
-from modals import EncounterPreviewModal, GeneratingModal, HelpModal, ImportingModal, ListModal, MonsterLibrary, NumberModal, PartyImportModal, PartyPreviewModal, ScratchpadModal, SpellBrowser, StartModal, TextModal
+from modals import (
+    EncounterPreviewModal,
+    GeneratingModal,
+    HelpModal,
+    ImportingModal,
+    ListModal,
+    MonsterLibrary,
+    NumberModal,
+    PartyImportModal,
+    PartyPreviewModal,
+    ScratchpadModal,
+    SpellBrowser,
+    StartModal,
+    TextModal,
+    folio_choice,
+)
 import srd as srd_client
 from widgets import CombatantRow, InitiativeList, LEFT_W, LogView, MapGrid
 from dm_screen import panel_text
@@ -114,22 +128,6 @@ def hint(key: str, word: str) -> str:
         if i >= 0:
             return f"{word[:i]}[bold #e6ebf2]{word[i]}[/][dim]{word[i + 1:]}[/]"
     return f"[bold #e6ebf2]{key}[/] [dim]{word}[/]"
-
-
-def folio_choice(verb: str, title: str, detail: str = "") -> str:
-    """Align a menu choice like a labelled entry in the DM's folio."""
-    accents = {
-        "RESUME": "#a8d0ff",
-        "RUN": "#e6ebf2",
-        "PREPARE": "#9fb0c6",
-        "RESTORE": "#d2aa5a",
-        "PLAY": "#d2aa5a",
-    }
-    label = verb.upper()
-    first_line = f"[bold {accents.get(label, '#c9d3e0')}]{label:<9}[/] [#e6ebf2]{title}[/]"
-    if not detail:
-        return first_line
-    return f"{first_line}\n          [#7d8794]{detail}[/]"
 
 
 class BattleApp(App[None]):

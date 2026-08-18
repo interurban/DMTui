@@ -79,8 +79,9 @@ def _post_json(config: dict, api_key: str, payload: dict) -> dict:
     except urllib.error.HTTPError as exc:
         try:
             detail = json.loads(exc.read().decode("utf-8"))
-            message = detail.get("error", {}).get("message", str(exc))
-        except Exception:
+            error = detail.get("error") if isinstance(detail, dict) else None
+            message = error.get("message", str(exc)) if isinstance(error, dict) else str(exc)
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
             message = str(exc)
         raise RuntimeError(f"OpenAI returned HTTP {exc.code}: {message}") from exc
     except (urllib.error.URLError, TimeoutError, OSError) as exc:

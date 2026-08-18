@@ -9,8 +9,9 @@ remain party-free monster setups so they can be reused with any campaign.
 from __future__ import annotations
 
 import json
-import os
 from typing import Any
+
+from persistence import write_json_atomic
 
 
 BOOK_VERSION = 2
@@ -103,18 +104,7 @@ def read_book(path: str) -> dict:
 
 def write_book(path: str, data: dict) -> None:
     """Atomically persist normalized campaign data."""
-    normalized = normalize_book(data)
-    temp_path = f"{path}.tmp"
-    try:
-        with open(temp_path, "w", encoding="utf-8") as campaign_file:
-            json.dump(normalized, campaign_file, indent=2)
-        os.replace(temp_path, path)
-    except Exception:
-        try:
-            os.unlink(temp_path)
-        except OSError:
-            pass
-        raise
+    write_json_atomic(path, normalize_book(data), indent=2)
 
 
 def party_for(data: dict, name: str | None) -> list[dict]:
@@ -122,4 +112,6 @@ def party_for(data: dict, name: str | None) -> list[dict]:
     if not isinstance(campaign, dict):
         return []
     party = campaign.get("party")
-    return [dict(member) for member in party if isinstance(member, dict)] if isinstance(party, list) else []
+    if not isinstance(party, list):
+        return []
+    return [dict(member) for member in party if isinstance(member, dict)]

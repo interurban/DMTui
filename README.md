@@ -261,6 +261,8 @@ compatibility alias for older setups.
 - `campaigns.py` — campaign, party roster, lookup preference, and notes persistence.
 - `encounter_store.py` — named campaign encounters, status, current pointers,
   atomic persistence, and legacy migration.
+- `persistence.py` — shared atomic JSON-write primitive used by Ward's stores
+  and cache.
 - `music.py` / `ward/music_config.json` — replaceable stream catalog and
   external-player boundary.
 - `ward_backup.py` — portable Ward data backups and validated recovery.

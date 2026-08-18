@@ -20,6 +20,8 @@ import re
 import urllib.error
 import urllib.request
 
+from persistence import write_json_atomic
+
 # Open5e v2 API. v1's `actions` left `damage` null; v2 carries the full
 # statblock text we parse below.
 BASE = "https://api.open5e.com/v2/"
@@ -165,8 +167,7 @@ def load_cache(name: str):
 
 def save_cache(name: str, data) -> None:
     os.makedirs(CACHE_DIR, exist_ok=True)
-    with open(cache_path(name), "w", encoding="utf-8") as fh:
-        json.dump(data, fh)
+    write_json_atomic(cache_path(name), data)
 
 
 def get_collection(name: str, endpoint: str, transform, document_keys=None, force: bool = False):

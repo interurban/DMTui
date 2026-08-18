@@ -1,279 +1,62 @@
-# Code review — findings & fixes
+# Ward code-health review
 
-Two comprehensive read-only review passes, each by two staff developers (one
-on `battle.py` / `ddb.py` / `tests.py`, one on `app.py` / `modals.py` /
-`widgets.py` / `smoke.py`). Both reviews verified the full test + smoke suites
-pass before reviewing. Findings are ordered by severity; everything was fixed
-in the same pass and locked in with regression tests.
+This is the current file-by-file maintenance record. Historical product changes
+and fixed defects live in `CHANGELOG.md`; keeping that history out of this file
+makes the active cleanup decisions easier to audit.
 
-## Review pass 2 — findings & fixes
+## Cleanup pass — August 2026
 
-### Critical
+The pass looked for unused imports and definitions, duplicated persistence and
+UI plumbing, stale compatibility paths, broad exception handling, oversized
+functions, unsafe subprocess use, and documentation that no longer described
+the shipped product.
 
-- None.
+### Changed
 
-### Major
+| File | Cleanup |
+| --- | --- |
+| `app.py` | Removed unused Textual imports, formatted the modal imports, and moved folio-label presentation into `modals.py`, where menu rendering belongs. |
+| `campaigns.py` | Replaced a private atomic-write copy with the shared persistence primitive and expanded a dense conditional return. |
+| `ddb.py` | Combined the duplicated equipped-inventory walks for armor and shields into one pass. |
+| `dmtui/cli.py` | Marked the legacy `main` re-export explicitly; this compatibility package is intentional, not abandoned code. |
+| `encounter_store.py` | Replaced its private atomic-write copy with the shared persistence primitive. |
+| `modals.py` | Consolidated repeated monster/spell search, selection, fetch, and list-rebuild behavior in `_SearchLibrary`; failed fetches now remain visible instead of being silently swallowed. Folio choice formatting moved here from `app.py`. |
+| `persistence.py` | Added one tested atomic JSON writer that preserves the previous file and removes its temporary file when serialization fails. |
+| `srd.py` | Made cache writes use the same atomic persistence path as user-owned data. |
+| `tests.py` | Added behavioral coverage for failed atomic writes; the suite now exercises 80 unit cases. |
+| `ward_backup.py` | Removed two more copies of atomic JSON-write and cleanup code. |
+| `pyproject.toml` | Ships the new persistence module. |
 
-### M1. "Healing Word" wasn't detected as a heal
-`battle.py:_HEAL_RE` — `\bheal\b` requires a word boundary after "heal", so
-"Healing Word" (and "Regenerate", "Healing Spirit", …) never matched and
-**damaged** its target instead of healing. Only "Cure Wounds" was covered by
-tests, so it slipped through pass 1.
-**Fix:** match word prefixes — `\b(heal\w*|cure\w*|restore\w*|mend\w*|regain\w*|hit points|hp)\b`.
-`test_resolve_spell_healing_word` locks it in.
+### Inspected; deliberately unchanged
 
-### M2. The DDB hit-dice sort was a no-op
-`ddb.py` — `sorted(hd.items(), key=_int)` passed each `(die, count)` *tuple* to
-`_int`, which swallowed the type error and returned the `0` default, so every
-key sorted equal and order was dict-insertion order. The multi-hit-dice test
-passed only because its fixture happened to insert `"8"` first.
-**Fix:** `key=lambda kv: -_int(kv[0])` (largest die first). A regression test
-feeds the dict smallest-first and asserts stable `"3d8, 2d6"` output.
+| File | Result |
+| --- | --- |
+| `battle.py` | Pure combat and dice logic remains cohesive and heavily exercised. No dead public definitions or imports were found. |
+| `dm_screen.py` | Static read-only reference data is already isolated from encounter mutation. |
+| `music.py` | Source configuration, backend selection, and subprocess ownership are separated cleanly; commands use argument lists rather than a shell. |
+| `openai_client.py` | Shared request/config helpers already remove the earlier duplication. The optional integration remains isolated from core encounter use. |
+| `widgets.py` | Small rendering-only module; no abandoned widget classes were found. |
+| `ward/` | Canonical installed entry point and packaged music catalog are both active. |
+| `dmtui/` | Retained only as the documented command/module compatibility alias. |
+| `smoke.py` | Its long linear scenario is intentional: it records one end-to-end table session and catches navigation regressions. Splitting it would obscure sequence and shared state. |
+| `requirements.txt` | Still matches the sole runtime dependency in `pyproject.toml` and remains the documented legacy install path. |
+| JSON configuration/examples | Current schemas and product terminology match the runtime normalizers. |
 
-### Minor
+### Remaining structural limits
 
-- **Save-DC spells with no dice dropped the save** — save parsing lived inside
-  the dice-only branch, so "Hold Person — (Wis DC 15)" reported a bare `damage
-  0` with no save. The save block now runs for any spell hint (not just those
-  with dice), and `_apply_attack_result` reports saved/failed even at 0 damage.
-- **A heal carrying a `(Con DC N)` hint got halved** on a "successful" save.
-  The save branch is now guarded with `not healing` — heals are never halved.
-- **`N darts` matching was too loose** — `N ×`/`N times`/`0 darts` multiplied
-  dice too. Scoped to an explicit `darts?` keyword with `N > 1`.
-- **Downed/dead targets logged "is already at max HP."** — the `applied == 0`
-  early-return hardcoded a heal message. Now branches on the delta sign
-  ("already at max HP" vs "is already down").
-- **`action_next_turn` never advanced the round with everyone dead** — the
-  `nxt <= start` wrap only fired when the scan ended on a living creature.
-  Now also `or scanned == n` when the scan exhausts the whole list. Smoke
-  covers it (kill everyone, `n` still ticks the round).
-- **A missed attack pushed a phantom undo entry** — `_apply_attack_result`
-  pushed undo unconditionally, so a miss / 0-damage spell / full-HP heal left
-  a no-op entry and cleared redo. Now only pushes undo when HP actually
-  changed. Smoke asserts the undo stack is untouched after a nat-1 miss.
-- **Undoing a load produced a hybrid state** — combatants reverted but the
-  *loaded* round/turn stuck around. Snapshots now carry a `restore_nav` flag:
-  world-replacing ops (load, reset, new encounter) restore round/turn on undo;
-  plain mutations keep the current navigation. The flag propagates through
-  undo *and* redo symmetrically. Verified by pilot (undo reverts round 99 → A,
-  redo re-applies A).
-- **`action_load` pushed a redundant undo entry when restore failed** — the
-  undo snapshot is now taken first and only pushed after a successful restore.
-- **`ctrl+p` palette was advertised but never bound** — the message bar and
-  help listed it; nothing handled it. The stale shortcut was removed from the
-  binding, message bar, help, and README.
-- **`find` couldn't parse Excel-style coordinates** — `@AA1` failed the
-  single-letter parser. `_parse_coord` mirrors `coord_name` for arbitrary
-  column lengths.
-- **`_messages` grew unboundedly** — capped at 200 entries.
-- **Small terminals clipped the map** — `MAP_ROWS` floored at 5 rendered more
-  lines than a short map widget holds. Floor lowered to 1 so rendering always
-  matches available rows.
-- **Heal spells logged the un-clamped amount** — a target 2 HP from max
-  "restored 12 HP". The log and undo now use the clamped applied delta.
+- `app.py` is still the largest module because it owns Textual orchestration.
+  A future split should follow stable product boundaries—campaign navigation,
+  encounter actions, and reference integrations—not arbitrary line counts.
+- `ddb.extract_combatant` is long, but its calculations share normalized
+  character context. It was kept together after removing the duplicated
+  inventory pass rather than fragmented into tightly coupled helpers.
+- Compatibility reads for legacy `encounter.json`, `character_ids`,
+  `VTT_OFFLINE`, and the `dmtui` launcher remain documented migration paths.
+  Removing them would strand existing user data or scripts for little gain.
 
-## DDB import hardening (pass 2, all tested)
+## Validation contract
 
-- **The flat damage bonus was double-counted in the to-hit default** — without
-  an explicit `attackBonus`, to-hit was `stat + prof + dmg_bonus`; a
-  `damageBonus: 3` Greataxe showed `+8 · 1d12+6`. In 5e the flat damage bonus
-  doesn't help you hit, so the default is now `stat + prof` (`+5 · 1d12+6`).
-- **Negative to-hit rendered `"+-2"`** (and `_ATK_RE` folded the stray `+` into
-  the weapon name) — now `f"{to_hit:+d}"` → `"Cursed Blade -2"`.
-- **Heavy armour applied a negative DEX penalty** (`min(dex_mod, 0)`); 5e
-  heavy armour ignores DEX entirely. Now `+0` for `dex_cap == 0`.
-- **A 200 with a non-JSON body** raised a raw `JSONDecodeError`; now wrapped in
-  a friendly `ValueError`.
-
-## Deliberately not changed (pass 2)
-
-- **`_restore` re-maps the turn by name on keep_nav** — duplicate PC names
-  resolve to the first match on undo. In practice names are unique; the risk is
-  a silent turn jump, never a crash.
-- **Undo of a move restores grab mode** (`_moving` back on) — arguably
-  intended: you're still holding the token.
-- **`CombatantRow` overflows at very narrow widths** — a `name_w` floor of 8 at
-  an 80-column terminal; cosmetic, out of scope.
-- **`action_help` double-wrapping / `_restore` index validation** — pass 1
-  already fixed these; pass 2 confirmed no regression.
-
-## Review pass 1 — findings & fixes
-
-### Critical
-
-- None.
-
-## Major
-
-### M1. `action_next_turn` could strand the turn on a dead/skipped wrap
-`app.py` — the round only incremented when the *raw* next index wrapped to 0.
-When the dead-skip scan wrapped past index 0 (e.g. the sole survivor is before
-the current turn), the round never advanced and the turn could land back on a
-dead creature.
-**Fix:** increment the round after the scan: `if nxt <= start: self.round += 1`.
-Verified in smoke (undo/redo section asserts turn/round survive undo).
-
-### M2. Critical hits added the flat bonus twice
-`battle.py:resolve_attack` — a nat-20 on `1d8+4` rolled `2×(1d8) + 8` instead of
-`2×(1d8) + 4`. `tests.py` enshrined the wrong value (16 instead of 12).
-**Fix:** on crit, re-roll the dice expression with the `[+-]N` suffix stripped
-so the bonus is added once. `test_resolve_crit` now asserts `12`.
-
-### M3. `build_encounter` returned the shared module singletons
-`battle.py` — `PARTY + ENCOUNTER_MONSTERS` handed the *same* objects to every
-caller, so `r` (reset) returned the exact monsters you'd been damaging; HP and
-conditions never actually reset.
-**Fix:** `build_encounter` deep-clones per call. Regression test mutates one
-call's result and asserts the next call is untouched.
-
-### M4. Spell resolution was too naive
-`battle.py:resolve_attack` — spells always hit, always dealt damage: save-DC
-spells never offered a save, heal spells ("Cure Wounds — 1d8+2 HP") *damaged*
-their target, and "3 darts" lines (Magic Missile) rolled once instead of thrice.
-**Fix:** spells now parse a `(Dex DC 12)` hint and grant the target a save
-(half damage on success, logged as saved/failed), heal/cure/regain keywords
-restore HP instead (applied in `_apply_attack_result`), and `N darts`/`N ×`
-lines roll the dice expression N times. Covered by four new unit tests.
-
-## Minor
-
-- **`find_free_spot` returned an occupied `(0,0)` on a full map** — now returns
-  `None`; spawn/import/add-PC callers log a warning and skip. Test added.
-- **Map bottom row was clipped** — `MAP_ROWS = grid.size.height` but the map
-  renders a header line + `MAP_ROWS` data rows. Now `height - 1`.
-- **Heal/damage modals accepted non-positive amounts** and logged the *requested*
-  rather than *applied* delta (a heal on a full-HP target logged "recovers 5").
-  Amounts ≤ 0 are rejected; logs now use the clamped applied delta.
-- **Undo rewound the turn/round** — undo of a damage reverted navigation too.
-  `_restore(snap, keep_nav=True)` now reverts combatant state while preserving
-  the current round/turn; load still applies the saved round/turn.
-- **`action_save` crashed**: `SAVE_PATH` was referenced but never defined
-  (the smoke test monkeypatched it, masking the bug). Now defined in `app.py`.
-- **`coord_name` overflowed past `Z`** at 30 columns. Now Excel-style (`AA1`).
-- **`_spawn_monster` numbering** counted `Goblin Boss`/`Goblin Shaman` as
-  `Goblin` spawns (prefix match) and could double-assign a name. Now counts by
-  exact name / trailing number.
-- **`_restore` stats backfill** — a hand-edited save with no `stats` produced a
-  `None` mod and crashed the detail card. Stats default to 10s; the saves row
-  also renders `(—)` instead of crashing.
-- **`_import_flow` had a ~15s interactive window** during the background fetch —
-  keystrokes could leak into the live encounter. A blocking `ImportingModal` is
-  shown while the fetch runs.
-- **`hp_frac` crashed on `max_hp = 0`**, **`short_label` on an empty name** —
-  both guarded.
-- **`encounter_monster`** double-bound `**over` on known keys (`max_hp`, `ac`,
-  `conditions`, …). Now built from a base dict with explicit copies.
-- **`_remove_flow`** left `_sel` desynced from the advanced turn. Synced.
-- **`action_load`** didn't validate structure — non-dict/corrupt saves crash or
-  silently no-op. Now validated and wrapped.
-- **`action_help`** double-wrapped itself (async action → run_worker → flow).
-  Now a plain synchronous push.
-
-## DDB import hardening (all tested)
-
-- Spell entries with a `None` `definition` crashed the parser.
-- Multi-die `hitPointDice` produced `"3d88"`-style concatenation → now
-  `"3d8, 2d6"`.
-- `stats` dicts (string keys, arbitrary order) were read by insertion order →
-  now sorted by ability id.
-- `armorTypeId` arriving as a string broke shield/armor detection → coerced.
-- Magic weapons: an explicit `attackBonus` is trusted over the computed bonus
-  (avoids double-counting the flat damage bonus).
-- Negative `removedHitPoints` pushed `hp` above `max_hp` → clamped.
-- `urlopen` raising `URLError`/`OSError`/`TimeoutError` leaked raw exceptions →
-  now wrapped in `ValueError`; non-dict payloads rejected.
-
-## Deliberately not changed
-
-- **Weapon-like lines missing their `+N` bonus** still fall through to the spell
-  branch and auto-hit. Every shipped template is well-formed (enforced by
-  `test_monster_templates_are_well_formed`), so this only affects hand-authored
-  data. Documented rather than special-cased.
-- **Spells resolve against a single target**; multi-target/friendly-fire and
-  spell slots are out of scope for this tracker.
-- **`_number_flow` rejections** (e.g. damage 0) log a warning; the user can
-  retry or Esc out.
-## Round 3 + UX pass — findings & fixes (current session)
-
-### Critical
-
-- None.
-
-### Major
-
-### E1. Inline damage/heal entry (no popup)
-`app.py` — pressing `d` or `h` arms a number-entry mode; digits appear in the
-initiative status row (e.g. `DAMAGE 12 → Dent`), Enter applies the signed amount,
-Esc cancels, Backspace edits. Replaces the old `_run_number`/`_make_number_modal`/
-`_number_flow` flow that pushed a `NumberModal` screen. Regression:
-`test_resolve_spell_regenerate_without_hp`, `test_resolve_damage_spell_mentioning_hp_is_not_heal`,
-`test_resolve_spell_zero_darts_not_multiplied`, `test_resolve_crit_multi_die_no_bonus`.
-
-### E2. Enter = attack (not auto-apply)
-The `Enter` key opens the attack-with list (same as pressing `a`); in inline
-entry mode `Enter` applies the typed number. This avoids the ambiguity of "Enter
-same as next" and matches the user's explicit choice.
-
-### E3. `r` = roll init, `shift+r` = reset
-The `r` key now rolls monster initiative (replacing the removed `o` binding).
-`shift+r` resets the encounter to round 1 (full HP, cleared conditions and inits).
-The old `r` = reset (demo purpose) is removed.
-
-### E4. Detail card spacing
-Added blank lines after the AC/vitals row, after the Skills row, and before the
-combatant note ("his voice crackles...") in `_detail_markup`, improving visual
-breathing room.
-
-### E5. Map tokens centered in cells
-`_map_cell` now centers the token glyph (marker + label) in the cell using
-auto-padding. Labels are capped at 3 characters via `short_label()`. A 3-char
-label in a 4-wide cell is centered (e.g. `"Lyr "`).
-
-### E6. Battle log flip + help hint removed
-`_log_text` renders messages newest-on-top (reversed `_messages`). `_refresh_log`
-uses `scroll_home` instead of `scroll_end`. `_log_status_text` drops the `? help`
-hint; the binding `?` still opens `HelpModal`.
-
-### E7. Modal centering + sizing
-`ModalScreen` alignment changed from `center top`/`padding-top: 3` to `center
-middle`, eliminating the visual "push-down" of the background UI. `.modal-box`
-width 57 (50% wider), `#modal-list` height 15 (~20% deeper). HelpModal keys text
-updated to reflect new bindings.
-
-### E8. Campaign system
-- **Default D&D Beyond URLs**: `91566422`, `112516506`, `90060446` seeded as
-  "My Campaign", set active on first run.
-- **`campaigns.json`** (`gitignored`) schema: `{"active": str, "campaigns": {name: {"character_ids": [int,...]}}}`.
-- **Boot** loads the active campaign, importing PCs best-effort (placeholder
-  `Char <id>` on fetch failure), placing them top-left on the map. If no saved
-  campaign exists, the default "My Campaign" is created and set active.
-- **`C` key** opens a campaign menu: `load` (loads a saved campaign), `save`
-  (saves current party's imported PCs as a new campaign with a name), `blank`
-  (starts a fresh encounter). The app remembers the last active campaign.
-- **`shift+c`** triggers the campaign menu.
-- **`_place_pc`** places imported PCs at deterministic top-left positions,
-  independent of the mutable `MAP_COLS` global, ensuring stable positioning
-  even while the layout settles during boot.
-
-### Minor
-
-- **`_restore` atomic round coercion** — `round` is coerced to `int` before
-  mutating `self.combatants`, so a corrupt save fails atomically instead of
-  leaving a half-restored state.
-- **Tests**: 10 regression tests added (spell regenerate without HP, inflict-
-  wounds-not-heal, zero-darts not multiplied, crit multi-die no-bonus, JSON/HTTP/
-  invalid-UTF-8 wrap, explicit attackBonus 0 trusted, heavy armor ignores
-  negative DEX, hit-dice non-numeric keys filtered). Tests went from 32 → 41 → 51.
-- **`ctrl+p` palette binding** now maps to `command_palette`.
-
-### Deliberately not changed
-
-- **`_restore` turn-replica on `keep_nav`** — duplicate PC names resolve to the
-  first match; risk is a silent turn jump, never a crash.
-- **`action_load` / `_restore`** — `restore_nav` flag still distinguishes world-
-  replacing ops from plain mutations.
-- **`_detail_markup`** — note placement and formatting unchanged beyond the
-  added blank lines.
-- **`find_free_spot`** — top-right scan preserves existing spawn/add behavior.
-- **`_number_flow` / `_make_number_modal`** — removed from `app.py` but the
-  `NumberModal` class in `modals.py` remains available for other uses.
+Before cleanup is published, Ward must pass Python compilation, all unit tests,
+the complete headless Textual smoke scenario, editable-package construction,
+and whitespace validation. No live campaign data or real music stream is used
+by those checks.

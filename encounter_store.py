@@ -9,9 +9,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
-import os
 import uuid
 from typing import Any
+
+from persistence import write_json_atomic
 
 
 STORE_VERSION = 1
@@ -99,18 +100,7 @@ def read_store(path: str) -> dict:
 
 
 def write_store(path: str, data: dict) -> None:
-    normalized = normalize_store(data)
-    temp_path = f"{path}.tmp"
-    try:
-        with open(temp_path, "w", encoding="utf-8") as encounter_file:
-            json.dump(normalized, encounter_file, indent=2)
-        os.replace(temp_path, path)
-    except Exception:
-        try:
-            os.unlink(temp_path)
-        except OSError:
-            pass
-        raise
+    write_json_atomic(path, normalize_store(data), indent=2)
 
 
 def records_for(data: dict, campaign: str | None) -> list[dict]:
