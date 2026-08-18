@@ -1,10 +1,11 @@
-# Battle Tracker
+# Ward
 
-A single-screen terminal combat tracker for D&D 5e DMs. One screen holds the
-whole battle: a token map on top, the initiative order, the battle log, and a
-detail card for the selected creature.
+A private, table-side control surface for an in-person D&D game. Ward remembers
+volatile encounter state, keeps campaign continuity, and retrieves quick
+references without trying to simulate the game. The DM's rulings and physical
+table remain authoritative.
 
-![battle tracker](shots/01-start.png)
+![Ward encounter screen](shots/01-start.png)
 
 Built with [Textual](https://textual.textualize.io/).
 
@@ -13,18 +14,19 @@ Built with [Textual](https://textual.textualize.io/).
 ```sh
 python -m venv .venv
 .venv/bin/pip install -e .
-dmtui
+ward
 ```
 
-The editable install provides both the `dmtui` command and `python -m dmtui`.
-The legacy `.venv/bin/python app.py` launch still works from a checkout.
+The editable install provides `ward` and `python -m ward`. The former `dmtui`
+command and module remain compatibility aliases. Running
+`.venv/bin/python app.py` still works from a checkout.
 
 `?` opens the in-app key guide. `CHANGELOG.md` is the sprint log; `REVIEW.md`
 documents both staff code-review passes and every fix that came out of them.
 `ROADMAP.md` tracks the prioritized next features and explicit non-goals.
 
-The `/` command and `Shift+E` AI encounter tool use the OpenAI model configured
-in `llm_config.json`. For local secret storage, copy `.env.example` to `.env`
+The optional `/` lookup and `Shift+E` encounter assistant use the OpenAI model
+configured in `llm_config.json`. For local secret storage, copy `.env.example` to `.env`
 and add your key:
 
 ```sh
@@ -45,12 +47,13 @@ export OPENAI_API_KEY="sk-your-key-here"
 
 The app loads `.env` automatically when it starts.
 
-On a fresh install, Ward offers three direct paths: set up a campaign, try a
-ready-to-run sample encounter, or start with an empty battlefield. Campaign
-setup asks for a name and 2014/2024 rules, then accepts one party member per
-line as a D&D Beyond URL, character ID, or plain name. Returning launches
-prioritize **Resume encounter**, followed by the active campaign home. Empty
-prepared-encounter and multi-campaign choices stay hidden until useful.
+Ward is organized around three moments: **Resume** an ongoing fight, **Run**
+what tonight needs, or **Prepare** a campaign and its future encounters. On a
+fresh install, Ward offers campaign setup, a ready-to-run sample, or a standalone
+empty encounter. Campaign setup asks for a name and party; each party member can
+be a D&D Beyond URL, character ID, or plain name. Returning launches put the
+last active encounter first and keep specialist preparation tools inside the
+campaign folio.
 
 Played encounters are remembered automatically in the ignored
 `campaign-encounters.json`; there is no manual save step. Each campaign keeps
@@ -59,8 +62,8 @@ encounter instead of replacing it, so ten fights can be named, browsed, and
 resumed independently. The startup screen resumes the most recently active
 fight; **Campaigns** opens any campaign without silently starting one.
 
-A campaign is the long-running game. It owns its party roster, ruleset, and
-notes in the ignored `campaigns.json`. A roster entry may be a D&D Beyond
+A campaign is the long-running game. It owns its party roster, lookup reference
+preference, and notes in the ignored `campaigns.json`. A roster entry may be a D&D Beyond
 character (refetched when a new encounter starts) or a manually named
 adventurer (started from editable defaults). `Shift+C` opens the active
 campaign during play. Editing the campaign party never rewrites the encounter
@@ -68,20 +71,29 @@ already on the table; it takes effect the next time that campaign starts an
 encounter. Conversely, encounter damage, conditions, and edits stay in that
 fight and do not silently rewrite the campaign roster.
 
-`Shift+C` opens the campaign home. It shows the current encounter, total open
-and completed encounters, new/prepared encounter actions, party, ruleset,
-notes, and campaign switching. The encounter index sorts **Current** first,
+`Shift+C` opens the campaign folio. It puts resume/new-encounter actions first,
+then groups encounter preparation, campaign details, backup/recovery, and
+campaign switching. The encounter index sorts **Current** first,
 then **Paused**, then **Complete**, with round, creature count, and last-updated
 date. Selecting an encounter offers resume, rename, or mark complete. Resuming
 a completed encounter reopens it and pauses the previous current fight.
 
+Choose **Ward data** from the campaign folio to export campaigns, parties,
+notes, played encounters, and reusable monster setups into a portable JSON
+backup under `ward-backups/`. Ward can restore any listed backup and first
+creates a safety backup of the data being replaced. The same restore option is
+available on an otherwise empty first-run screen when backups exist. These
+files are ignored by Git; copy important backups outside the checkout for
+protection from checkout loss, and to another disk or storage service for
+protection from disk loss.
+
 Older single-resume `encounter.json` files migrate automatically as a named
 **Recovered encounter** the first time the new encounter store is opened.
 
-Press `Shift+E` to describe an encounter in plain language. The preview uses
-the loaded party's character levels and aggregate strength—HP, AC, attack
-bonuses, proficiency, spell DCs, and roles—to guide the requested difficulty.
-The accepted lineup still resolves to existing built-in/SRD statblocks.
+Press `Shift+E` to ask the optional encounter assistant for a monster lineup.
+The preview may include a rough pressure signal informed by the loaded party,
+but it is explicitly not encounter balancing. The DM judges suitability, and
+accepted creatures always resolve to existing built-in/SRD statblocks.
 
 For reference, the tracked `llm_config.json` contains only non-secret settings:
 
@@ -91,8 +103,9 @@ For reference, the tracked `llm_config.json` contains only non-secret settings:
 }
 ```
 
-Campaign rulesets are configured in `campaigns.json` with `"ruleset": "2014"`
-or `"ruleset": "2024"`. The active ruleset is included in DM chat context.
+Campaign details can hold a 2014 or 2024 **rules reference** preference. It
+guides optional lookups only; Ward does not enforce either ruleset or alter the
+encounter engine around it.
 
 ### DM Screen mode
 
@@ -103,6 +116,9 @@ saves, spell DCs, and PC conditions/reminders. Press `Ctrl+1` to return to the
 encounter, or `s` to cycle through all three modes. Bare `Tab` and function keys
 are left to normal terminal/desktop behavior. The references are intentionally
 read-only; the physical table remains authoritative.
+
+The small token map is a spatial note that mirrors the physical table. It does
+not calculate range, movement, terrain, line of sight, areas, or legal actions.
 
 ### D&D Beyond imports
 
@@ -150,7 +166,7 @@ remembers the notes; `Esc` cancels.
 | `i` | import a PC from a D&D Beyond URL |
 | `p` | add a PC from a name |
 | `e` | edit the selected creature (name, HP, AC, init mod, role, note, scores) |
-| `Shift+e` | describe an encounter and preview an AI-generated monster lineup |
+| `Shift+e` | ask for a catalog-only encounter suggestion with rough pressure guidance |
 | `f` | find a creature by name or map coordinate (`@B3`, `@AA1`) |
 | `u` / `Shift+u` | undo / redo |
 | `s` | cycle Combat → DM Screen → Party Reference |
@@ -196,7 +212,8 @@ Document**, fetched from [Open5e](https://open5e.com) on first use and cached to
 `.cache/open5e/`. The first open fetches in the background (needs network, once);
 subsequent opens are instant. SRD creatures/spells are converted into the same
 statblocks the rest of the app uses, so they're indistinguishable in play. Set
-`VTT_OFFLINE=1` to disable all network fetches.
+`WARD_OFFLINE=1` to disable all network fetches. `VTT_OFFLINE` remains a
+compatibility alias for older setups.
 
 - `srd.py` is the generic client — `fetch_raw` / `get_collection` paginate and
   cache any Open5e v2 collection, so other content (magic items, conditions, …)
@@ -208,9 +225,11 @@ statblocks the rest of the app uses, so they're indistinguishable in play. Set
 - `app.py` — the `BattleApp` TUI: bindings, flows, rendering, CSS.
 - `battle.py` — data model (`Combatant`), dice engine, attack resolution,
   monster library, the starting encounter.
-- `campaigns.py` — campaign, party roster, ruleset, and notes persistence.
+- `campaigns.py` — campaign, party roster, lookup preference, and notes persistence.
 - `encounter_store.py` — named campaign encounters, status, current pointers,
   atomic persistence, and legacy migration.
+- `ward_backup.py` — portable Ward data backups and validated recovery.
+- `ward/` — the installed `ward` command and module entry point.
 - `ddb.py` — D&D Beyond character-service parsing (`extract_combatant`).
 - `widgets.py` — initiative row, token map, scroll containers.
 - `modals.py` — number/list/text prompts, the help screen, and the import

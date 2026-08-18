@@ -1,46 +1,53 @@
 # Ward roadmap
 
-Ward is a digital DM screen for an in-person D&D game. The physical table is
-authoritative; Ward should remove bookkeeping and lookup interruptions without
-trying to become a VTT.
+Ward is a private, table-side tool for the Dungeon Master in an in-person D&D
+game. It remembers volatile state, preserves campaign continuity, and retrieves
+references without trying to simulate the game. The DM's rulings and physical
+table are authoritative.
 
-## Priorities
+## Product moments
 
-### Phase 1 — Preparation speed
+Ward is organized around three moments rather than a growing feature catalog:
 
-1. **Prepared encounters** — save and start reusable monster setups with
-   monsters, positions, default HP, clear conditions, and unrolled initiative.
-2. **Campaign scratchpad** — keep a small persistent text area for NPC names,
-   clues, loot, passwords, and other session notes.
-3. **Campaign encounter index** — **Complete.** Campaigns keep multiple named
-   Current/Paused/Complete encounter instances; prepared encounters remain
-   reusable monster-only templates.
+1. **Resume** — reopen the exact encounter that was interrupted, with its round,
+   turn, HP, conditions, reminders, and spatial notes intact.
+2. **Run** — keep the common table loop fast: initiative, turns, HP, conditions,
+   quick rolls, and glanceable references.
+3. **Prepare** — manage campaign parties and notes, reusable monster setups, and
+   named encounter history without changing the fight currently on the table.
 
-### Phase 2 — Party awareness
+## Current focus — trust and table validation
 
-3. **Party reference mode** — compact AC, passive Perception, passive Insight,
-   saves, spell DCs, and current HP for quick secret checks. **In progress.**
-4. **Better prepared-party workflows** — **Complete.** Prepared encounters
-   store monsters only and combine with the active campaign's remembered party.
+- **Complete: campaign continuity.** Campaigns own parties, notes, a lookup
+  preference, and any number of Current/Paused/Complete encounters.
+- **Complete: preparation.** Reusable monster setups combine with the selected
+  campaign party without becoming played encounters themselves.
+- **Complete: DM references.** DM Screen and Party Reference are read-only,
+  glanceable views that do not replace character sheets or rulings.
+- **Complete: backup and recovery.** A portable Ward backup contains campaigns,
+  parties, notes, played encounters, and reusable monster setups; restore first
+  preserves the data it replaces.
+- **Next: real-session observation.** Use Ward at several physical tables and
+  record which actions interrupt play, which shortcuts are remembered, and
+  which screens go unused. Simplify from evidence before adding automation.
 
-### Phase 3 — Lightweight effects
+## Deferred until table use proves the need
 
-5. **Timed effects** — add optional round counts to reminders only after
-   turn reminders have been used at the table. Keep this manual and explicit;
-   do not infer spell durations or automate concentration.
+- **Timed reminders.** Optional round counts may be useful, but Ward will not
+  infer spell durations, automate concentration, or advance effects on the
+  DM's behalf.
+- **Rules-reference variants.** The campaign's 2014/2024 preference currently
+  guides optional lookups only. Ward must not imply rules enforcement unless a
+  genuinely edition-specific reference earns its place.
 
 ## Deliberate non-goals
 
-- No terrain simulation, line of sight, range enforcement, pathfinding, or AoE
-  geometry.
+- Ward is not a VTT: no terrain simulation, legal-move system, line of sight,
+  range enforcement, pathfinding, area geometry, or remote player view.
 - No player client, networking, full character-sheet replacement, spell-slot
-  manager, or encounter-balancing engine.
-- No LLM router or agent framework. Chat remains a small lookup box, with local
-  SRD data supplying obvious spell context when useful.
-
-## Current status
-
-The table-speed release is complete: DM Screen mode, Quick Numbers, fast
-initiative entry, duplicate monster, bloodied state, turn reminders, local
-dice commands, and laptop-safe shortcuts are shipped. Phase 1 is complete;
-Phase 2, item 3 (Party Reference mode), is now in progress.
+  manager, or authoritative encounter-balancing engine.
+- The token map is only a quick note mirroring the physical table.
+- Encounter-assistant pressure labels are rough suggestions for DM review, not
+  calculated balance or a promise of difficulty.
+- No LLM router or agent framework. Optional assistance remains a small lookup
+  and catalog-only suggestion surface.

@@ -1,7 +1,26 @@
 # Changelog
 
-Sprint log for the Battle Tracker — a single-screen terminal combat tracker
-for D&D 5e DMs (Textual). Run: `dmtui`.
+Sprint log for Ward — a private, table-side tool for D&D Dungeon Masters
+(Textual). Run: `ward` (`dmtui` remains a compatibility alias).
+
+## Ward product focus
+
+- Ward is now the product name, installed command, module entry point, help
+  identity, and documentation title. The former `dmtui` command still works.
+- Startup and campaign navigation now use the real table moments: Resume, Run,
+  and Prepare. Common turn actions dominate the live hint bar; specialist tools
+  remain discoverable in the reorganized help screen and campaign folio.
+- Campaign ruleset selection moved out of first-run setup and became an explicit
+  lookup-reference preference. Ward does not claim to enforce 2014 or 2024
+  rules.
+- The encounter assistant now reports rough pressure rather than authoritative
+  difficulty, and its copy explicitly says this is DM-reviewed guidance rather
+  than encounter balancing.
+- Ward data can be exported as one portable JSON backup containing campaigns,
+  parties, notes, played encounters, and reusable monster setups. Restore
+  validates the bundle and writes a safety backup before replacing live data.
+- Help and roadmap copy define the token map as a spatial note mirroring the
+  physical table—not a virtual tabletop.
 
 ## First-run folio + campaign ownership
 
