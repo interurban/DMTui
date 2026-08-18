@@ -37,6 +37,12 @@ TYPE_HTML = """
 <div class="col-md-3 mix three"><div class="track_title"><h3>Three</h3><i>music + minimal ambience</i></div><p class="flavor">three</p><a onclick="saveAs('three')">Save</a></div>
 """
 
+PROMO_HTML = """
+<div class="col-md-3 mix watch"><div class="track_title"><h3>Watchtower</h3><i>ambience + minimal music</i></div>
+<p class="flavor">Wind over the wall. [4 Alternate versions available for <a href="https://patreon.com/tabletopaudio">Patreon Patrons</a>]</p>
+<a onclick="saveAs('watchtower')">Save</a></div>
+"""
+
 
 def test_parse_and_exclude_non_public_or_invalid_actions() -> None:
     tracks = ta.parse_catalog_html(HTML)
@@ -65,6 +71,17 @@ def test_displayed_type_variants_are_preserved_without_ontology() -> None:
         "music + ambience",
         "music + minimal ambience",
     ]
+
+
+def test_patreon_alternate_promotion_is_removed_from_flavor_only() -> None:
+    track = ta.parse_catalog_html(PROMO_HTML)[0]
+    assert track.description == "Wind over the wall."
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "catalog.json")
+        with open(path, "w", encoding="utf-8") as output:
+            json.dump({"fetched_at": 100, "tracks": [{**track.as_cache_dict(), "description": "Wind. [4 Alternate versions available for Patreon Patrons]"}]}, output)
+        loaded = ta.load_catalog(path, now=101, fetcher=lambda _timeout: (_ for _ in ()).throw(AssertionError()))
+        assert loaded.tracks[0].description == "Wind."
 
 
 def test_track_model_is_immutable_and_rejects_malformed_fields() -> None:
@@ -199,6 +216,13 @@ def test_ranking_is_local_weighted_and_explicit_for_empty_queries() -> None:
     assert len(ta.rank_tracks(tracks, "plain", limit=2)) == 2
     assert ta.rank_tracks(tracks, "", limit=1) == ()
     assert ta.rank_tracks(tracks, "spaceship") == ()
+    noise = (
+        ta.TabletopAudioTrack("outpost", "Outpost 31", "quiet", "plain", ()),
+        ta.TabletopAudioTrack("round", "Round 3", "quiet", "plain", ()),
+    )
+    assert [track.slug for track in ta.rank_tracks(noise, "Round 3")] == ["round"]
+    assert ta.rank_tracks(noise, "31") == ()
+    assert ta.rank_tracks(noise, "out") == ()
 
 
 def test_loop_config_validation_and_exact_player_commands() -> None:
@@ -221,9 +245,13 @@ def test_loop_config_validation_and_exact_player_commands() -> None:
     player.play(music.MusicSource("Loop", "https://a", loop=True))
     assert calls[-1] == ["/bin/player", "--no-video", "--really-quiet", "--force-window=no", "--volume=40", "--loop=inf", "https://a"]
     player.stop()
+    player = music.MusicPlayer(backend="mpv", volume=40, which=lambda _name: "/bin/player", popen=lambda command, **kwargs: calls.append(command) or _Process())
+    player.play(music.MusicSource("Tabletop Audio", "https://a", loop=True, referrer="https://tabletopaudio.com/"))
+    assert calls[-1] == ["/bin/player", "--no-video", "--really-quiet", "--force-window=no", "--volume=40", "--loop=inf", "--referrer=https://tabletopaudio.com/", "https://a"]
+    player.stop()
     player = music.MusicPlayer(backend="ffplay", volume=40, which=lambda _name: "/bin/player", popen=lambda command, **kwargs: calls.append(command) or _Process())
-    player.play(music.MusicSource("Loop", "https://a", loop=True))
-    assert calls[-1] == ["/bin/player", "-nodisp", "-autoexit", "-loglevel", "error", "-volume", "40", "-loop", "0", "https://a"]
+    player.play(music.MusicSource("Tabletop Audio", "https://a", loop=True, referrer="https://tabletopaudio.com/"))
+    assert calls[-1] == ["/bin/player", "-nodisp", "-autoexit", "-loglevel", "error", "-volume", "40", "-loop", "0", "-referer", "https://tabletopaudio.com/", "https://a"]
     player.stop()
     player = music.MusicPlayer(backend="mpv", volume=40, which=lambda _name: "/bin/player", popen=lambda command, **kwargs: calls.append(command) or _Process())
     player.play(music.MusicSource("Default", "https://a"))

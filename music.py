@@ -16,6 +16,7 @@ class MusicSource:
     url: str
     note: str = ""
     loop: bool = False
+    referrer: str = ""
 
 
 @dataclass(frozen=True)
@@ -126,6 +127,7 @@ class MusicPlayer:
                 "--force-window=no",
                 f"--volume={self.volume}",
                 *(["--loop=inf"] if source.loop else []),
+                *([f"--referrer={source.referrer}"] if source.referrer else []),
                 source.url,
             ]
         return [
@@ -137,6 +139,7 @@ class MusicPlayer:
             "-volume",
             str(self.volume),
             *(["-loop", "0"] if source.loop else []),
+            *(["-referer", source.referrer] if source.referrer else []),
             source.url,
         ]
 

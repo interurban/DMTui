@@ -27,6 +27,10 @@ MAX_FETCH_TIMEOUT_SECONDS = 30.0
 USER_AGENT = "Ward/1.0 (Tabletop Audio catalog; +https://tabletopaudio.com/)"
 _SLUG_RE = re.compile(r"^[A-Za-z0-9_]+$")
 _SAVE_RE = re.compile(r"\bsaveAs\s*\(\s*(['\"])([A-Za-z0-9_]+)\1\s*\)")
+_PATREON_PROMO_RE = re.compile(
+    r"\s*\[\s*(?:\d+\s+)?alternate\s+versions\s+available\s+for[^\]]*\]\s*$",
+    re.IGNORECASE,
+)
 _WORD_RE = re.compile(r"[A-Za-z0-9]+")
 
 
@@ -130,6 +134,11 @@ def _text(node: _Node) -> str:
     return " ".join(
         part for child in node.children for part in ([child] if isinstance(child, str) else [_text(child)]) if part
     ).strip()
+
+
+def _strip_patreon_promo(description: str) -> str:
+    """Remove only the paid alternate-version notice appended to flavor text."""
+    return _PATREON_PROMO_RE.sub("", description).strip()
 
 
 def _find_class(node: _Node, *names: str) -> list[_Node]:
@@ -245,6 +254,7 @@ def _card_track(card: _Node) -> TabletopAudioTrack | None:
                 if "patreon" not in text.casefold() and not any(label in text.casefold() for label in ("save", "add", "play")):
                     pieces.append(text)
         description = pieces[0] if pieces else ""
+    description = _strip_patreon_promo(description)
 
     categories = tuple(
         dict.fromkeys(
@@ -309,7 +319,8 @@ def _cache_tracks(raw: Any) -> tuple[float, tuple[TabletopAudioTrack, ...]]:
         try:
             track = TabletopAudioTrack(
                 slug=item["slug"], title=item["title"], audio_type=item.get("audio_type", ""),
-                description=item.get("description", ""), categories=item.get("categories", ()),
+                description=_strip_patreon_promo(item.get("description", "")),
+                categories=item.get("categories", ()),
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise ValueError("cache contains malformed track metadata") from exc
@@ -378,13 +389,21 @@ def rank_tracks(tracks: Iterable[TabletopAudioTrack], query: str, limit: int = 1
         or limit <= 0
     ):
         return ()
-    terms = tuple(dict.fromkeys(word.casefold() for word in _WORD_RE.findall(query)))
+    terms = tuple(
+        dict.fromkeys(
+            word.casefold()
+            for word in _WORD_RE.findall(query)
+            if not word.isdigit()
+        )
+    )
+    if not terms:
+        return ()
     scored: list[tuple[int, str, str, TabletopAudioTrack]] = []
     for track in tracks:
-        title = track.title.casefold()
-        categories = " ".join(track.categories).casefold()
-        kind = track.audio_type.casefold()
-        description = track.description.casefold()
+        title = {word.casefold() for word in _WORD_RE.findall(track.title)}
+        categories = {word.casefold() for category in track.categories for word in _WORD_RE.findall(category)}
+        kind = {word.casefold() for word in _WORD_RE.findall(track.audio_type)}
+        description = {word.casefold() for word in _WORD_RE.findall(track.description)}
         score = sum(
             (100 if term in title else 0)
             + (30 if term in categories else 0)
