@@ -183,7 +183,9 @@ remembers the notes; `Esc` cancels.
 
 Ward uses one keyboard grammar: bare keys act on the live encounter; `Ctrl`
 opens Ward-wide tools or changes session-level state. Each panel footer shows
-only its essential local commands. Press `?` for this complete reference.
+only its essential local commands. Bare shortcut letters are highlighted inside
+their action labels; `Ctrl` and symbol shortcuts stay explicit. Press `?` for
+this complete reference.
 
 | Key | Action |
 | --- | --- |

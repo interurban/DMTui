@@ -752,7 +752,7 @@ def test_modified_bindings_use_one_ctrl_only_grammar():
 
 
 def test_panel_key_hints_keep_only_the_local_working_set():
-    from app import BattleApp
+    from app import BattleApp, hint
 
     app = BattleApp()
     assert all(key in app._map_status_text() for key in ("↑↓", "←→", "g"))
@@ -760,6 +760,8 @@ def test_panel_key_hints_keep_only_the_local_working_set():
     assert all(key in app._log_status_text() for key in ("Ctrl+Z", "Ctrl+Y"))
     assert all(key in app._detail_status_text() for key in ("a", "d", "h", "c"))
     assert "Ctrl+O" not in app._detail_status_text()
+    assert hint("n", "next turn") == "[bold #f0c96a]n[/][dim]ext turn[/]"
+    assert hint("ctrl+n", "new encounter").startswith("[bold #f0c96a]Ctrl+N[/]")
 
 
 def test_music_config_keeps_sources_swappable_and_validated():

@@ -122,12 +122,18 @@ LOG_COLORS = {
 
 
 def hint(key: str, word: str) -> str:
-    """Render an explicit, consistently cased key followed by its action."""
+    """Highlight a mnemonic inside its action, or show non-mnemonic keys first."""
+    if len(key) == 1 and key.isalpha():
+        index = word.lower().find(key.lower())
+        if index >= 0:
+            before = f"[dim]{word[:index]}[/]" if index else ""
+            after = f"[dim]{word[index + 1:]}[/]" if index + 1 < len(word) else ""
+            return f"{before}[bold #f0c96a]{word[index]}[/]{after}"
     display_key = key
     if key.startswith("ctrl+"):
         suffix = key.removeprefix("ctrl+")
         display_key = f"Ctrl+{suffix.upper() if len(suffix) == 1 else suffix.title()}"
-    return f"[bold #e6ebf2]{display_key}[/] [dim]{word}[/]"
+    return f"[bold #f0c96a]{display_key}[/] [dim]{word}[/]"
 
 
 def _music_nav_display(player: music.MusicPlayer) -> tuple[str, str]:
@@ -2244,12 +2250,16 @@ class BattleApp(App[None]):
         if self.view_mode == "dm_screen":
             grid.update(panel_text("combat"))
             self.query_one("#map-title", Static).update("COMBAT QUICK RULES")
-            self.query_one("#map-status", Static).update("s switch view  ·  Ctrl+1 combat")
+            self.query_one("#map-status", Static).update(
+                "  ·  ".join([hint("s", "switch view"), hint("ctrl+1", "combat")])
+            )
             return
         if self.view_mode == "party":
             grid.update(self._party_overview_markup())
             self.query_one("#map-title", Static).update("PARTY REFERENCE")
-            self.query_one("#map-status", Static).update("s switch view  ·  Ctrl+1 combat")
+            self.query_one("#map-status", Static).update(
+                "  ·  ".join([hint("s", "switch view"), hint("ctrl+1", "combat")])
+            )
             return
         avail_w = max(1, grid.size.width - LEFT_W)
         cell_w = 4 if avail_w >= 20 else 3
@@ -2460,12 +2470,14 @@ class BattleApp(App[None]):
         if self._moving and sel:
             return f"[bold #3fae6a]MOVING {sel.name}[/] — [bold #e6ebf2]arrows[/] [dim]place[/], [bold #e6ebf2]g[/]/[bold #e6ebf2]esc[/] [dim]drop[/]"
         sel_s = f"[bold #ffffff]{sel.name}[/] @ {coord_name(sel.x, sel.y)}" if sel else "none"
-        hint_text = "  ·  ".join([hint("↑↓", "select"), hint("←→", "±HP"), hint("g", "move")])
+        hint_text = "  ·  ".join(
+            [hint("↑↓", "select"), hint("←→", "±HP"), hint("g", "grab / move")]
+        )
         return f"{sel_s}   ·   {hint_text}"
 
     def _init_status_text(self) -> str:
         if self.view_mode != "combat":
-            return "s switch view  ·  Ctrl+1 combat"
+            return "  ·  ".join([hint("s", "switch view"), hint("ctrl+1", "combat")])
         if self._init_entry is not None and self._sel is not None:
             return (
                 f"[bold #e0c04c]INIT[/] [bold #e6ebf2]{self._init_entry or '--'}[/] → "
@@ -2487,14 +2499,12 @@ class BattleApp(App[None]):
 
     def _log_status_text(self) -> str:
         if self.view_mode != "combat":
-            return "/ lookup  ·  ? all keys"
-        return "  ·  ".join(
-            ["[dim]remembered automatically[/]", hint("ctrl+z", "undo"), hint("ctrl+y", "redo")]
-        )
+            return "  ·  ".join([hint("/", "lookup"), hint("?", "all keys")])
+        return "  ·  ".join([hint("ctrl+z", "undo"), hint("ctrl+y", "redo")])
 
     def _detail_status_text(self) -> str:
         if self.view_mode != "combat":
-            return "/ lookup  ·  ? all keys"
+            return "  ·  ".join([hint("/", "lookup"), hint("?", "all keys")])
         return "  ·  ".join(
             [
                 hint("a", "attack"),
