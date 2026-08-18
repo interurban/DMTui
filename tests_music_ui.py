@@ -11,6 +11,7 @@ from battle import Combatant
 from modals import GeneratingModal, ListModal, TextModal
 import openai_client
 import tabletop_audio
+from textual.screen import ModalScreen
 
 
 def _response(content):
@@ -232,6 +233,33 @@ def test_music_worker_is_named_and_exclusive():
     assert len(calls) == 2
     assert all(kwargs["name"] == "music-controls" for _work, kwargs in calls)
     assert all(kwargs["group"] == "music-controls" and kwargs["exclusive"] for _work, kwargs in calls)
+
+
+def test_mounted_music_back_naturally_returns_to_the_root_screen():
+    class TestApp(BattleApp):
+        async def _boot_campaign(self):
+            return
+
+    async def exercise():
+        app = TestApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.press("ctrl+k")
+            for _ in range(20):
+                await pilot.pause()
+                if isinstance(app.screen, ListModal):
+                    break
+            else:
+                raise AssertionError("music controls did not open")
+            await pilot.press("end", "enter")
+            for _ in range(20):
+                await pilot.pause()
+                if not isinstance(app.screen, ModalScreen):
+                    break
+            else:
+                raise AssertionError("music controls did not close")
+            assert app.is_mounted and not isinstance(app.screen, ModalScreen)
+
+    asyncio.run(exercise())
 
 
 def test_invalid_config_still_offers_online_tabletop_audio_and_playback_failure_reopens_controls():

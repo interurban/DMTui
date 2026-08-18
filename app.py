@@ -1225,6 +1225,11 @@ class BattleApp(App[None]):
     def _sync_music_status(self) -> None:
         self.query_one("#music-status", MusicStatus).sync_playback()
 
+    def _dismiss_music_modal_if_current(self, modal: object) -> None:
+        """Dismiss only a still-current music modal during worker cleanup."""
+        if getattr(modal, "is_mounted", False) and self.screen is modal:
+            modal.dismiss()
+
     def _play_music_source(self, source: music.MusicSource, *, attribution: str = "") -> bool:
         """Start a source and keep the existing player/status reporting consistent."""
         try:
@@ -1271,9 +1276,11 @@ class BattleApp(App[None]):
                 return False
             self._log(f"Tabletop Audio suggestions unavailable: {escape(str(exc))}", kind="warn")
             return True
+        except asyncio.CancelledError:
+            self._dismiss_music_modal_if_current(loading)
+            raise
         finally:
-            if not loading.cancelled and loading.is_mounted:
-                loading.dismiss()
+            self._dismiss_music_modal_if_current(loading)
         if loading.cancelled:
             self._log("Tabletop Audio search cancelled.", kind="select")
             return True
@@ -1314,16 +1321,16 @@ class BattleApp(App[None]):
             )
             try:
                 picked = await self.push_screen(results, wait_for_dismiss=True)
-            finally:
-                if results.is_mounted:
-                    results.dismiss()
+            except asyncio.CancelledError:
+                self._dismiss_music_modal_if_current(results)
+                raise
             if picked == "refine":
                 refine = TextModal("REFINE TABLETOP AUDIO", "required: ominous rain, chase, candlelit ruins", confirm="Search")
                 try:
                     detail = await self.push_screen(refine, wait_for_dismiss=True) or ""
-                finally:
-                    if refine.is_mounted:
-                        refine.dismiss()
+                except asyncio.CancelledError:
+                    self._dismiss_music_modal_if_current(refine)
+                    raise
                 if not detail:
                     continue
                 continue
@@ -1396,9 +1403,9 @@ class BattleApp(App[None]):
             )
             try:
                 picked = await self.push_screen(controls, wait_for_dismiss=True)
-            finally:
-                if controls.is_mounted:
-                    controls.dismiss()
+            except asyncio.CancelledError:
+                self._dismiss_music_modal_if_current(controls)
+                raise
             if picked == "pause":
                 try:
                     paused = self._music.toggle_pause()
