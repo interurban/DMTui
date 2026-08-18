@@ -129,6 +129,7 @@ _HEAL_RE = re.compile(r"\b(heal\w*|cure\w*|restore\w*|mend\w*|regain\w*|regenera
 _SAVE_RE = re.compile(r"\(([a-z]+)\s+dc\s*(\d+)\)", re.IGNORECASE)
 _DARTS_RE = re.compile(r"(\d+)\s+darts?\b", re.IGNORECASE)
 _SAVE_ABILITY_ID = {"str": 1, "dex": 2, "con": 3, "int": 4, "wis": 5, "cha": 6}
+MAX_DICE_COUNT = 1000
 
 
 def is_healing_action(action: str) -> bool:
@@ -159,7 +160,7 @@ def roll_dice(spec: str, rng=random) -> tuple[int, list[int], int]:
     n = int(m.group(1) or 1)
     d = int(m.group(2))
     bonus = int(m.group(3) or 0)
-    if n < 1 or d < 1:
+    if n < 1 or d < 1 or n > MAX_DICE_COUNT:
         raise ValueError(f"bad dice expression: {spec!r}")
     rolls = [rng.randint(1, d) for _ in range(n)]
     return sum(rolls) + bonus, rolls, bonus

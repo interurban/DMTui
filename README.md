@@ -199,7 +199,7 @@ symbol shortcuts stay explicit. Press `?` for the complete reference.
 | `m` / `Ctrl+B` | quick add / browse the searchable monster library |
 | `v` | spellbook — browse the SRD and add a spell to the selected creature |
 | `x` | remove the selected creature (asks first) |
-| `r` / `t` | roll monster initiative / set a creature's initiative |
+| `r` / `t` | roll monster initiative / set a creature's initiative (`-` enters a negative value) |
 | `Ctrl+T` | enter initiative for each unrolled PC in sequence |
 | `+` | duplicate the selected monster at full HP |
 | `Ctrl+R` | reset the encounter (undoable) |
@@ -229,7 +229,9 @@ spells (e.g. Hold Person), heal/cure/regain spells restore HP instead of
 dealing damage (save hints never halve a heal), and `3 darts` lines
 (Magic Missile) roll the dice three times.
 
-`/roll 2d6+4` and `/r 1d20+7` roll locally without contacting OpenAI. Other
+`/roll 2d6+4` and `/r 1d20+7` roll locally without contacting OpenAI. A roll
+may contain at most 1,000 dice, preventing an accidental expression from
+blocking the table UI. Other
 `/` questions use the optional DM assistant with a small encounter context;
 cached SRD spell details are added only when the question clearly names a
 spell.

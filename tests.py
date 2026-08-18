@@ -1,12 +1,17 @@
 """Unit tests for the pure battle logic. Run: .venv/bin/python tests.py"""
 
+import asyncio
+import concurrent.futures
 import urllib.error
 import urllib.request
 import random
 import json
 import os
 import tempfile
+import threading
 from unittest import mock
+
+from rich.text import Text
 
 from battle import (
     action_targets,
@@ -68,6 +73,15 @@ def test_roll_dice():
             pass
         else:
             raise AssertionError(f"{bad!r} should raise")
+
+
+def test_roll_dice_rejects_resource_exhaustion_counts():
+    try:
+        roll_dice("1001d6", Seq([]))
+    except ValueError as exc:
+        assert "bad dice expression" in str(exc)
+    else:
+        raise AssertionError("unbounded dice counts must be rejected before rolling")
 
 
 def test_resolve_hit():
@@ -558,6 +572,12 @@ def test_extract_combatant_ignores_mixed_stat_rows():
     assert c.init_mod == 0
 
 
+def test_extract_combatant_rejects_non_string_external_names():
+    combatant = extract_combatant(77, {"name": {"unexpected": "object"}})
+    assert combatant.name == "Char 77"
+    assert isinstance(combatant.name, str)
+
+
 def test_fetch_character_data_network_error_raises_value_error():
     with mock.patch.object(urllib.request, "urlopen", side_effect=urllib.error.URLError("boom")):
         try:
@@ -795,6 +815,83 @@ def test_modified_bindings_use_one_ctrl_only_grammar():
     )
 
 
+def test_cancelled_encounter_generation_does_not_reopen_or_double_dismiss():
+    import app as appmod
+    from app import BattleApp
+    from modals import EncounterPreviewModal, GeneratingModal, TextModal
+    from textual.widgets import Input
+
+    class TestApp(BattleApp):
+        async def _boot_campaign(self) -> None:
+            return
+
+    async def exercise() -> None:
+        release = asyncio.Event()
+
+        async def delayed_plan(_func, *_args):
+            await release.wait()
+            return {
+                "title": "Cancelled", "theme": "None", "pressure": "Unknown",
+                "monsters": [{"name": "Goblin", "count": 1}],
+            }
+
+        app = TestApp()
+        with mock.patch.object(appmod, "run_in_thread", delayed_plan):
+            async with app.run_test() as pilot:
+                worker = app.run_worker(app._ai_encounter_flow())
+                for _ in range(20):
+                    await pilot.pause()
+                    if isinstance(app.screen, TextModal):
+                        break
+                assert isinstance(app.screen, TextModal)
+                app.screen.query_one(Input).value = "goblins"
+                await pilot.press("enter")
+                for _ in range(20):
+                    await pilot.pause()
+                    if isinstance(app.screen, GeneratingModal):
+                        break
+                assert isinstance(app.screen, GeneratingModal)
+                await pilot.press("escape")
+                await pilot.pause()
+                release.set()
+                await worker.wait()
+                await pilot.pause()
+                assert not isinstance(app.screen, (GeneratingModal, EncounterPreviewModal))
+                assert any("cancelled" in message.lower() for message, _kind, _shown in app._messages)
+
+    asyncio.run(exercise())
+
+
+def test_duplicate_srd_fetch_workers_are_coalesced():
+    import app as appmod
+    from app import BattleApp
+
+    async def exercise() -> None:
+        app = BattleApp()
+        app._log = lambda *_args, **_kwargs: None
+        started = asyncio.Event()
+        release = asyncio.Event()
+        calls = 0
+
+        async def delayed_fetch(_func, *_args):
+            nonlocal calls
+            calls += 1
+            started.set()
+            await release.wait()
+            return []
+
+        with mock.patch.object(appmod, "run_in_thread", delayed_fetch):
+            first = asyncio.create_task(app._fetch_srd_worker())
+            await started.wait()
+            second = asyncio.create_task(app._fetch_srd_worker())
+            await asyncio.sleep(0)
+            release.set()
+            await asyncio.gather(first, second)
+        assert calls == 1
+
+    asyncio.run(exercise())
+
+
 def test_panel_key_hints_keep_only_the_local_working_set():
     from app import BattleApp, hint
 
@@ -935,6 +1032,53 @@ def test_atomic_json_write_preserves_existing_data_on_failure():
         with open(path, encoding="utf-8") as state_file:
             assert json.load(state_file) == {"state": "before"}
         assert not os.path.exists(f"{path}.tmp")
+
+
+def test_concurrent_atomic_writes_leave_complete_json():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "state.json")
+        barrier = threading.Barrier(8)
+
+        def write(index: int) -> None:
+            barrier.wait()
+            persistence.write_json_atomic(path, {"writer": index, "payload": [index] * 500})
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            list(executor.map(write, range(8)))
+        with open(path, encoding="utf-8") as state_file:
+            saved = json.load(state_file)
+        assert saved["writer"] in range(8)
+        assert saved["payload"] == [saved["writer"]] * 500
+
+
+def test_group_json_write_rolls_back_an_earlier_replace():
+    with tempfile.TemporaryDirectory() as tmp:
+        paths = [os.path.join(tmp, name) for name in ("one.json", "two.json", "three.json")]
+        for index, path in enumerate(paths):
+            persistence.write_json_atomic(path, {"state": f"old-{index}"})
+
+        real_replace = persistence.os.replace
+
+        def fail_second_new_file(source: str, destination: str) -> None:
+            if destination == paths[1] and source.endswith(".tmp"):
+                raise OSError("simulated disk failure")
+            real_replace(source, destination)
+
+        with mock.patch.object(persistence.os, "replace", side_effect=fail_second_new_file):
+            try:
+                persistence.write_json_group_atomic([
+                    (path, {"state": f"new-{index}"}, 2)
+                    for index, path in enumerate(paths)
+                ])
+            except OSError as exc:
+                assert "simulated disk failure" in str(exc)
+            else:
+                raise AssertionError("the injected replacement failure must propagate")
+
+        for index, path in enumerate(paths):
+            with open(path, encoding="utf-8") as state_file:
+                assert json.load(state_file) == {"state": f"old-{index}"}
+        assert not [name for name in os.listdir(tmp) if name.endswith((".tmp", ".rollback"))]
 
 
 def test_saved_campaigns_put_active_first_and_keep_empty_campaigns():
@@ -1175,6 +1319,27 @@ def test_encounter_store_repairs_malformed_state():
     assert data["encounters"]["stray"]["status"] == "paused"
 
 
+def test_snapshot_validation_rejects_bad_types_and_restore_ignores_future_fields():
+    from app import BattleApp
+
+    bad = {"combatants": [{"name": {"bad": "type"}, "kind": "PC", "hp": 1, "max_hp": 1, "ac": 10}]}
+    assert not encounter_store.valid_snapshot(bad)
+
+    future = {
+        "combatants": [{
+            "name": "Scout", "kind": "PC", "hp": 8, "max_hp": 10, "ac": 14,
+            "future_field": {"newer": "Ward"},
+        }],
+        "round": 2,
+    }
+    assert encounter_store.valid_snapshot(future)
+    app = BattleApp()
+    app._rebuild_rows = lambda: None
+    app._restore(future, keep_nav=False)
+    assert [combatant.name for combatant in app.combatants] == ["Scout"]
+    assert app.round == 2
+
+
 def test_encounter_store_repairs_current_scope_from_record_ownership():
     snapshot = {"combatants": [], "round": 1}
     data = encounter_store.normalize_store({
@@ -1308,6 +1473,90 @@ def test_removing_combatant_outside_turn_order_does_not_start_combat():
     assert app._sel.name == "C"
 
 
+def test_first_next_turn_starts_at_highest_initiative_without_advancing_round():
+    from app import BattleApp
+
+    high = Combatant("High", "PC", hp=5, max_hp=5, ac=10, init=20)
+    low = Combatant("Low", "PC", hp=5, max_hp=5, ac=10, init=5)
+    app = BattleApp()
+    app.combatants = [low, high]
+    app._turn = None
+    app._sel = low
+    app._rebuild_rows = lambda: None
+    app._refresh_all = lambda: None
+    app._log = lambda *_args, **_kwargs: None
+    app._sort_combatants()
+    app.action_next_turn()
+    assert app._turn is high
+    assert app._sel is high
+    assert app.round == 1
+
+    app = BattleApp()
+    solo = Combatant("Solo", "PC", hp=5, max_hp=5, ac=10)
+    app.combatants = [solo]
+    app._turn = None
+    app._refresh_all = lambda: None
+    app._log = lambda *_args, **_kwargs: None
+    app.action_next_turn()
+    assert app._turn is solo and app.round == 1
+
+
+def test_negative_initiative_can_be_entered():
+    from app import BattleApp
+
+    app = BattleApp()
+    creature = Combatant("Slow", "PC", hp=5, max_hp=5, ac=10)
+    app.combatants = [creature]
+    app._sel = creature
+    app._refresh_all = lambda: None
+    app._log = lambda *_args, **_kwargs: None
+    app.action_set_init()
+    app.action_init_minus()
+    app.action_hp_digit(4)
+    app._finish_hp_entry()
+    assert creature.init == -4
+
+
+def test_map_shrink_reflows_tokens_into_visible_unique_cells():
+    import app as appmod
+    from app import BattleApp
+
+    app = BattleApp()
+    far = Combatant("Far", "PC", hp=5, max_hp=5, ac=10, x=10, y=10)
+    collision = Combatant("Collision", "monster", hp=5, max_hp=5, ac=10, x=10, y=10)
+    app.combatants = [far, collision]
+    with mock.patch.object(appmod, "MAP_COLS", 5), mock.patch.object(appmod, "MAP_ROWS", 4):
+        app._fit_tokens_to_map()
+        positions = {(creature.x, creature.y) for creature in app.combatants}
+        assert len(positions) == 2
+        assert all(0 <= x < 5 and 0 <= y < 4 for x, y in positions)
+
+
+def test_attack_picker_targets_duplicate_names_by_row_identity():
+    from app import BattleApp
+
+    async def exercise() -> None:
+        app = BattleApp()
+        actor = Combatant("Caster", "PC", hp=5, max_hp=5, ac=10, spells=["Spark — 1d4 fire"])
+        first = Combatant("Twin", "monster", hp=5, max_hp=5, ac=10)
+        second = Combatant("Twin", "monster", hp=2, max_hp=5, ac=10)
+        app.combatants = [actor, first, second]
+        app._sel = actor
+        answers = iter([actor.spells[0], "1"])
+
+        async def choose(*_args, **_kwargs):
+            return next(answers)
+
+        selected = []
+        app.push_screen = choose
+        app._apply_attack_result = lambda _actor, target, _result: selected.append(target)
+        app._rng = Seq([2])
+        await app._attack_flow()
+        assert selected == [second]
+
+    asyncio.run(exercise())
+
+
 def test_unknown_restored_condition_remains_renderable():
     from app import BattleApp
 
@@ -1319,6 +1568,23 @@ def test_unknown_restored_condition_remains_renderable():
     app._sel = app.combatants[0]
     markup = app._detail_markup()
     assert "? future-condition" in markup
+
+
+def test_user_and_external_text_is_safe_rich_markup():
+    from app import BattleApp
+
+    app = BattleApp()
+    creature = Combatant(
+        "Bob[/] [the Bold]", "PC", hp=8, max_hp=10, ac=14,
+        role="Mage[/]", note="Keeps [brackets] literal[/]",
+        attacks=["Blade[/] +2 · 1d4"], traits=["Odd [trait][/]"],
+        reminder="Save[/] now",
+    )
+    app.combatants = [creature]
+    app._sel = creature
+    rendered = Text.from_markup(app._detail_markup())
+    assert "Bob[/] [the Bold]" in rendered.plain
+    assert "Keeps [brackets] literal[/]" in rendered.plain
 
 
 def test_ward_backup_roundtrip_restores_all_user_data():
@@ -1344,6 +1610,67 @@ def test_ward_backup_roundtrip_restores_all_user_data():
         assert encounter_store.read_store(encounter_path) == encounter_store.normalize_store(encounters)
         with open(template_path, encoding="utf-8") as template_file:
             assert json.load(template_file) == templates
+
+
+def test_ward_backup_restore_failure_keeps_all_live_files_unchanged():
+    old_campaigns = campaign_store.normalize_book({
+        "active": "Old", "campaigns": {"Old": {"party": [], "ruleset": "2014"}},
+    })
+    new_campaigns = campaign_store.normalize_book({
+        "active": "New", "campaigns": {"New": {"party": [], "ruleset": "2024"}},
+    })
+    with tempfile.TemporaryDirectory() as tmp:
+        backup = ward_backup.write_backup(
+            os.path.join(tmp, "backups"), new_campaigns, encounter_store.empty_store(), {"templates": {}},
+        )
+        campaign_path = os.path.join(tmp, "campaigns.json")
+        encounter_path = os.path.join(tmp, "campaign-encounters.json")
+        template_path = os.path.join(tmp, "encounters.json")
+        campaign_store.write_book(campaign_path, old_campaigns)
+        old_encounters = encounter_store.empty_store()
+        old_templates = {"templates": {}}
+        encounter_store.write_store(encounter_path, old_encounters)
+        ward_backup.write_templates(template_path, old_templates)
+
+        real_replace = persistence.os.replace
+
+        def fail_encounter_replace(source: str, destination: str) -> None:
+            if destination == encounter_path and source.endswith(".tmp"):
+                raise OSError("simulated restore failure")
+            real_replace(source, destination)
+
+        with mock.patch.object(persistence.os, "replace", side_effect=fail_encounter_replace):
+            try:
+                ward_backup.restore_backup(backup, campaign_path, encounter_path, template_path)
+            except OSError:
+                pass
+            else:
+                raise AssertionError("the injected restore failure must propagate")
+        assert campaign_store.read_book(campaign_path) == old_campaigns
+        assert encounter_store.read_store(encounter_path) == old_encounters
+        with open(template_path, encoding="utf-8") as template_file:
+            assert json.load(template_file) == old_templates
+
+
+def test_corrupt_prepared_encounters_are_not_startable():
+    from app import BattleApp
+
+    corrupt = {
+        "templates": {
+            "Broken": {
+                "snapshot": {
+                    "combatants": [{"name": "Goblin"}],
+                }
+            }
+        }
+    }
+    assert ward_backup.normalize_templates(corrupt) == {"templates": {}}
+    app = BattleApp()
+    original = Combatant("Current", "PC", hp=5, max_hp=5, ac=10)
+    app.combatants = [original]
+    app._log = lambda *_args, **_kwargs: None
+    assert not app._load_template("Broken", corrupt)
+    assert app.combatants == [original]
 
 
 def test_ward_backup_rejects_unrelated_json():

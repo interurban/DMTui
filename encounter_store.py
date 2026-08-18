@@ -19,6 +19,12 @@ STORE_VERSION = 1
 NO_CAMPAIGN = "__campaign_free__"
 VALID_STATUSES = {"active", "paused", "complete"}
 SNAPSHOT_REQUIRED_FIELDS = {"name", "kind", "hp", "max_hp", "ac"}
+SNAPSHOT_INT_FIELDS = {"hp", "max_hp", "ac", "init_mod", "x", "y"}
+SNAPSHOT_OPTIONAL_INT_FIELDS = {
+    "init", "speed", "proficiency", "passive_perception", "spell_dc", "ddb_id", "level",
+}
+SNAPSHOT_STRING_FIELDS = {"name", "kind", "role", "note", "hit_dice", "reminder"}
+SNAPSHOT_STRING_LIST_FIELDS = {"conditions", "attacks", "traits", "spells"}
 
 
 def empty_store() -> dict:
@@ -46,12 +52,59 @@ def valid_snapshot(snapshot: Any) -> bool:
     """Return whether a snapshot has enough structure to be resumed safely."""
     if not isinstance(snapshot, dict) or not isinstance(snapshot.get("combatants"), list):
         return False
-    return all(
-        isinstance(creature, dict)
-        and SNAPSHOT_REQUIRED_FIELDS.issubset(creature)
-        and ("stats" not in creature or isinstance(creature["stats"], dict))
-        for creature in snapshot["combatants"]
-    )
+    for creature in snapshot["combatants"]:
+        if not isinstance(creature, dict) or not SNAPSHOT_REQUIRED_FIELDS.issubset(creature):
+            return False
+        if any(
+            field in creature and not isinstance(creature[field], str)
+            for field in SNAPSHOT_STRING_FIELDS
+        ):
+            return False
+        if any(
+            field in creature
+            and (not isinstance(creature[field], int) or isinstance(creature[field], bool))
+            for field in SNAPSHOT_INT_FIELDS
+        ):
+            return False
+        if any(
+            field in creature
+            and creature[field] is not None
+            and (not isinstance(creature[field], int) or isinstance(creature[field], bool))
+            for field in SNAPSHOT_OPTIONAL_INT_FIELDS
+        ):
+            return False
+        for field in SNAPSHOT_STRING_LIST_FIELDS:
+            value = creature.get(field, [])
+            if not isinstance(value, (list, tuple, set)) or not all(isinstance(item, str) for item in value):
+                return False
+        stats = creature.get("stats", {})
+        if not isinstance(stats, dict):
+            return False
+        try:
+            if any(
+                not 1 <= int(key) <= 6
+                or not isinstance(value, int)
+                or isinstance(value, bool)
+                for key, value in stats.items()
+            ):
+                return False
+        except (TypeError, ValueError):
+            return False
+        saves = creature.get("saves", [])
+        if not isinstance(saves, (list, tuple, set)) or any(
+            not isinstance(value, int) or isinstance(value, bool) or not 1 <= value <= 6
+            for value in saves
+        ):
+            return False
+        skills = creature.get("skills", {})
+        if not isinstance(skills, dict) or any(
+            not isinstance(key, str)
+            or not isinstance(value, int)
+            or isinstance(value, bool)
+            for key, value in skills.items()
+        ):
+            return False
+    return True
 
 
 def normalize_store(raw: Any) -> dict:

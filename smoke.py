@@ -246,7 +246,7 @@ async def main() -> None:
         assert "\n\n" in detail, detail
 
         # next turn a few times
-        app._turn.reminder = "WIS save DC 14"
+        app.combatants[0].reminder = "WIS save DC 14"
         for _ in range(4):
             await pilot.press("n")
             await pilot.pause()
@@ -697,6 +697,7 @@ async def main() -> None:
         assert all(c.hp == c.max_hp and c.init is None and not c.conditions for c in app.combatants)
         for c in app.combatants:
             c.hp = 0
+        app._turn = app.combatants[0]
         r0 = app.round
         await pilot.press("n")
         await pilot.pause()

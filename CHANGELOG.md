@@ -43,6 +43,21 @@ Sprint log for Ward — a private, table-side tool for D&D Dungeon Masters
 
 ## Reliability bug hunt — August 2026
 
+- A full phased audit fixed thirteen additional defects across encounter state,
+  recovery, external-data parsing, and rendering. The first `n` now starts the
+  highest living initiative on round 1 (including blank and solo encounters),
+  and negative initiatives can be entered directly.
+- Backup restore now stages all three data files and rolls back earlier replaces
+  if any later write fails. Snapshot and prepared-encounter validation rejects
+  malformed nested combatant fields before live session state changes.
+- Map resize reflows tokens that would be stranded or collide off-grid, and
+  duplicate creature names retain distinct attack targets.
+- AI encounter cancellation no longer dismisses an already-closed modal, while
+  duplicate monster/spell fetch requests are coalesced and cache writes use
+  unique temporary files.
+- User, imported, cached, and error text is escaped before Rich rendering. D&D
+  Beyond names are normalized to strings, and local rolls reject more than
+  1,000 dice to keep malformed input bounded.
 - Removing the active creature now hands initiative to its actual successor
   instead of skipping a turn. Removing creatures before initiative begins no
   longer starts combat implicitly, and removing the last active creature wraps

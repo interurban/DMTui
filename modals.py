@@ -68,7 +68,9 @@ class NumberModal(ModalScreen[int]):
 
     def compose(self) -> ComposeResult:
         with Container(classes="modal-box"):
-            yield Static(f"[bold #e6ebf2]{self._title} — [white]{self._target}[/][/]", classes="modal-title")
+            title = escape(self._title)
+            target = escape(self._target)
+            yield Static(f"[bold #e6ebf2]{title} — [white]{target}[/][/]", classes="modal-title")
             self._input = Input(placeholder=self._placeholder, type="integer")
             yield self._input
             yield Static("[dim][bold]Enter[/] apply · [bold]Esc[/] cancel[/]", classes="modal-hint")
@@ -301,11 +303,11 @@ class EncounterPreviewModal(ModalScreen[str]):
         theme = str(self._plan.get("theme") or "")
         pressure = str(self._plan.get("pressure") or self._plan.get("difficulty") or "Unknown")
         detail = (
-            f"[dim]{theme}[/]\n[bold #a8d0ff]Rough pressure:[/] {pressure}  "
+            f"[dim]{escape(theme)}[/]\n[bold #a8d0ff]Rough pressure:[/] {escape(pressure)}  "
             "[dim]DM judgment, not balancing[/]\n\n" + "\n".join(self._lines)
         )
         with Container(classes="modal-box"):
-            yield Static(f"[bold #e6ebf2]{title}[/]", classes="modal-title")
+            yield Static(f"[bold #e6ebf2]{escape(title)}[/]", classes="modal-title")
             yield Static(detail)
             yield Static(
                 "[dim][bold]Enter[/] add · [bold]r[/] regenerate · [bold]Esc[/] cancel[/]",
@@ -327,12 +329,17 @@ class GeneratingModal(ModalScreen[None]):
 
     BINDINGS = [("escape", "cancel", "Cancel")]
 
+    def __init__(self) -> None:
+        super().__init__()
+        self.cancelled = False
+
     def compose(self) -> ComposeResult:
         with Container(classes="modal-box"):
             yield Static("[bold #a8d0ff]Building encounter…[/]", classes="modal-title")
             yield Static("[dim]Choosing existing monster statblocks — one moment.[/]")
 
     def action_cancel(self) -> None:
+        self.cancelled = True
         self.dismiss(None)
 
 
@@ -436,7 +443,9 @@ class _SearchLibrary(ModalScreen[None]):
         try:
             self._fetch_fn()
         except Exception as exc:
-            self.query_one("#lib-status", Static).update(f"[dim #d95841]Fetch failed: {exc}[/]")
+            self.query_one("#lib-status", Static).update(
+                f"[dim #d95841]Fetch failed: {escape(str(exc))}[/]"
+            )
 
     def action_cancel(self) -> None:
         self.dismiss(None)
@@ -476,13 +485,17 @@ class MonsterLibrary(_SearchLibrary):
         out: list[tuple[str, tuple[str, object]]] = []
         for name, m in sorted(self._builtins.items()):
             if not q or q in name.lower() or q in str(m.get("role", "")).lower():
-                label = f"{name}   [dim][built-in] hp {m['max_hp']} · ac {m['ac']} · {m.get('role', '')}[/]"
+                source = escape("[built-in]")
+                label = f"{escape(str(name))}   [dim]{source} hp {m['max_hp']} · ac {m['ac']} · {escape(str(m.get('role', '')))}[/]"
                 out.append((label, ("builtin", name)))
         for m in self._srd:
-            nm = m.get("name", "?")
+            if not isinstance(m, dict):
+                continue
+            nm = str(m.get("name", "?"))
             hay = f"{nm} {m.get('role', '')} {m.get('note', '')}".lower()
             if not q or q in hay:
-                label = f"{nm}   [dim][SRD] hp {m['max_hp']} · ac {m['ac']} · {m.get('role', '')}[/]"
+                source = escape("[SRD]")
+                label = f"{escape(str(nm))}   [dim]{source} hp {m['max_hp']} · ac {m['ac']} · {escape(str(m.get('role', '')))}[/]"
                 out.append((label, ("srd", m)))
         return out
 
@@ -493,11 +506,11 @@ class MonsterLibrary(_SearchLibrary):
         try:
             added = self._add_fn(payload)
         except Exception as exc:  # never let a bad add kill the picker
-            self.query_one("#lib-status", Static).update(f"[dim #d95841]Add failed: {exc}[/]")
+            self.query_one("#lib-status", Static).update(f"[dim #d95841]Add failed: {escape(str(exc))}[/]")
             return
         if added:
             self.query_one("#lib-status", Static).update(
-                f"[dim #3fae6a]Added {added} — press [bold]Esc[/] when done[/]"
+                f"[dim #3fae6a]Added {escape(str(added))} — press [bold]Esc[/] when done[/]"
             )
             lv = self.query_one("#lib-list", ListView)
             if lv.index is None and self._current:
@@ -541,11 +554,13 @@ class SpellBrowser(_SearchLibrary):
         q = self.query_one("#lib-search", Input).value.strip().lower()
         out: list[tuple[str, dict]] = []
         for m in self._spells:
-            nm = m.get("name", "?")
+            if not isinstance(m, dict):
+                continue
+            nm = str(m.get("name", "?"))
             hay = f"{nm} {m.get('school', '')} level {m.get('level', '')}".lower()
             if not q or q in hay:
                 lvl = m.get("level", 0)
-                label = f"{nm}   [dim]L{lvl} {m.get('school', '')}[/]"
+                label = f"{escape(str(nm))}   [dim]L{lvl} {escape(str(m.get('school', '')))}[/]"
                 out.append((label, m))
         return out
 
@@ -557,20 +572,20 @@ class SpellBrowser(_SearchLibrary):
         if idx is not None and 0 <= idx < len(self._current):
             m = self._current[idx][1]
             info = f"{m.get('name')} · L{m.get('level', 0)} {m.get('school', '')} · {m.get('casting_time', '')} · {m.get('range', '')}"
-            self.query_one("#lib-status", Static).update(f"[dim]{info}[/]")
+            self.query_one("#lib-status", Static).update(f"[dim]{escape(info)}[/]")
 
     def _add(self, fields: dict) -> None:
         try:
             added = self._add_fn(fields)
         except Exception as exc:
-            self.query_one("#lib-status", Static).update(f"[dim #d95841]Add failed: {exc}[/]")
+            self.query_one("#lib-status", Static).update(f"[dim #d95841]Add failed: {escape(str(exc))}[/]")
             return
         if added is None:
             # no creature selected — warn and stay open
             self._warn_fn()
             return
         self.query_one("#lib-status", Static).update(
-            f"[dim #3fae6a]Added {added} — press [bold]Esc[/] when done[/]"
+            f"[dim #3fae6a]Added {escape(str(added))} — press [bold]Esc[/] when done[/]"
         )
         lv = self.query_one("#lib-list", ListView)
         if lv.index is None and self._current:

@@ -144,7 +144,8 @@ def extract_combatant(character_id: int, data: dict) -> Combatant:
     character = data.get("character") if isinstance(data, dict) else None
     if not isinstance(character, dict) or not character:
         character = data if isinstance(data, dict) else {}
-    name = character.get("name") or f"Char {character_id}"
+    raw_name = character.get("name")
+    name = raw_name.strip() if isinstance(raw_name, str) and raw_name.strip() else f"Char {character_id}"
 
     total_level = 0
     parts = []
@@ -155,7 +156,8 @@ def extract_combatant(character_id: int, data: dict) -> Combatant:
             definition = {"name": definition}
         elif not isinstance(definition, dict):
             definition = {}
-        cname = definition.get("name") or cls.get("name") or "?"
+        raw_class_name = definition.get("name") or cls.get("name")
+        cname = raw_class_name.strip() if isinstance(raw_class_name, str) and raw_class_name.strip() else "?"
         level = _int(cls.get("level"), 1)
         total_level += level
         parts.append(f"{cname} {level}")
@@ -338,7 +340,7 @@ def extract_combatant(character_id: int, data: dict) -> Combatant:
         traits.append(f"{race.strip()} racial traits")
     for f in _as_list(character.get("classFeatures"))[:2]:
         if isinstance(f, dict) and f.get("name"):
-            traits.append(f["name"])
+            traits.append(str(f["name"]))
 
     spells: list[str] = []
     spell_items: list = []
@@ -350,7 +352,9 @@ def extract_combatant(character_id: int, data: dict) -> Combatant:
     for spell in spell_items[:8]:
         defn = spell.get("definition") if isinstance(spell, dict) else None
         if isinstance(defn, dict) and defn.get("name"):
-            spells.append(defn["name"])
+            spell_name = defn["name"]
+            if isinstance(spell_name, str) and spell_name.strip():
+                spells.append(spell_name.strip())
 
     spell_dc = None
     for key in ("spellSaveDC", "spellSaveDc", "spellDC", "spellDc"):

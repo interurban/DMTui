@@ -6,6 +6,27 @@ makes the active cleanup decisions easier to audit.
 
 ## Bug hunt — August 2026
 
+The latest phased read covered all tracked Python source in priority order:
+state/persistence boundaries first, encounter mutations second, external-data
+and asynchronous flows third, then rendering and regression infrastructure.
+It reproduced and fixed thirteen additional failures:
+
+| Priority | Area | Reproduced defect and resolution |
+| --- | --- | --- |
+| P0 | Turn start | Sorting initiative left the current pointer on the old first row, so `n` skipped the highest initiative. New and reset encounters now have no active turn; the first `n` starts the highest living creature without advancing the round. |
+| P0 | Backup restore | Three independent atomic writes could leave a mixed-generation restore. All files are staged together and already-replaced files roll back if a later replace fails. |
+| P1 | Empty/solo turns | A blank encounter's first creature and a solo encounter could begin on round 2. The explicit not-started state keeps both on round 1. |
+| P1 | Map resize | Shrinking the terminal could strand tokens outside the visible grid. Invalid or colliding positions now reflow to visible free cells. |
+| P1 | Snapshots | Shallow validation accepted malformed nested fields that crashed restore. Every combatant field used by restore is type-checked before mutation, while unknown future fields remain forward-compatible. |
+| P1 | Templates | Selecting a corrupt template created and activated a blank encounter before failing. Corrupt entries are filtered and the flow validates before changing session state. |
+| P1 | Cancellation | Escaping the encounter-generation modal caused the worker to dismiss it a second time. Cancellation is recorded and mounted screens are dismissed only once. |
+| P1 | Targeting | Duplicate creature names resolved attacks to the first match. Target choices now carry stable row indices. |
+| P1 | Rendering | Names, notes, actions, imported content, and errors could inject invalid Rich markup. Dynamic display text is escaped at rendering boundaries. |
+| P1 | D&D Beyond | A structured character name could survive parsing and crash string consumers. Names and class/spell labels now accept only usable strings or safe fallbacks. |
+| P2 | Initiative input | The inline editor could not enter negative initiative. A leading minus is now accepted and validated. |
+| P2 | Dice input | `/roll` accepted an unbounded dice count and could block the UI. Rolls are capped at 1,000 dice. |
+| P2 | Cache writes | Concurrent SRD fetches shared a fixed `.tmp` path. Atomic writes use unique sibling files and duplicate in-app fetches are coalesced. |
+
 The post-cleanup hunts read every tracked source module and reproduced eleven
 boundary or state-transition failures. The first pass covered negative dice
 results, healing-target eligibility, mismatched encounter scope pointers, and
@@ -25,7 +46,7 @@ The full-code pass added coverage for seven more cases:
 
 These fixes remain at shared logic, persistence, and external-service
 boundaries so UI flows and future callers receive the same behavior. The unit
-suite now exercises 93 cases.
+suite now exercises 107 cases.
 
 ## Cleanup pass — August 2026
 
@@ -46,7 +67,7 @@ the shipped product.
 | `modals.py` | Consolidated repeated monster/spell search, selection, fetch, and list-rebuild behavior in `_SearchLibrary`; failed fetches now remain visible instead of being silently swallowed. Folio choice formatting moved here from `app.py`. |
 | `persistence.py` | Added one tested atomic JSON writer that preserves the previous file and removes its temporary file when serialization fails. |
 | `srd.py` | Made cache writes use the same atomic persistence path as user-owned data. |
-| `tests.py` | Added behavioral coverage for failed atomic writes; the cleanup pass brought the suite to 80 unit cases, and the subsequent bug hunts expanded it to 93. |
+| `tests.py` | Added behavioral coverage for failed atomic writes; the cleanup pass brought the suite to 80 unit cases, earlier bug hunts expanded it to 93, and the phased full-code audit brought it to 107. |
 | `ward_backup.py` | Removed two more copies of atomic JSON-write and cleanup code. |
 | `pyproject.toml` | Ships the new persistence module. |
 

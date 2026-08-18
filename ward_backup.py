@@ -9,7 +9,7 @@ from typing import Any
 
 import campaigns as campaign_store
 import encounter_store
-from persistence import write_json_atomic
+from persistence import write_json_atomic, write_json_group_atomic
 
 
 BACKUP_FORMAT = "ward-data-backup"
@@ -23,7 +23,9 @@ def normalize_templates(raw: Any) -> dict:
         "templates": {
             str(name): snapshot
             for name, snapshot in raw["templates"].items()
-            if str(name).strip() and isinstance(snapshot, dict)
+            if str(name).strip()
+            and isinstance(snapshot, dict)
+            and encounter_store.valid_snapshot(snapshot.get("snapshot"))
         }
     }
 
@@ -89,7 +91,9 @@ def write_templates(path: str, templates: dict) -> None:
 def restore_backup(path: str, campaign_path: str, encounter_path: str, template_path: str) -> dict:
     """Validate the complete bundle before replacing any live Ward data."""
     bundle = read_backup(path)
-    campaign_store.write_book(campaign_path, bundle["campaigns"])
-    encounter_store.write_store(encounter_path, bundle["encounters"])
-    write_templates(template_path, bundle["prepared_encounters"])
+    write_json_group_atomic([
+        (campaign_path, campaign_store.normalize_book(bundle["campaigns"]), 2),
+        (encounter_path, encounter_store.normalize_store(bundle["encounters"]), 2),
+        (template_path, normalize_templates(bundle["prepared_encounters"]), 2),
+    ])
     return bundle
