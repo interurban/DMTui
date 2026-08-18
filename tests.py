@@ -20,6 +20,8 @@ from battle import (
 from ddb import extract_combatant, fetch_character_data, parse_ddb_url, parse_ddb_urls
 import campaigns as campaign_store
 import encounter_store
+import openai_client
+import ward_backup
 
 
 class Seq:
@@ -123,110 +125,54 @@ def test_resolve_spell_save_half_damage():
     assert res["damage"] == 5 and res["save"]["saved"] is True
 
 
-def test_resolve_spell_heals():
-    atk, tgt = dent(), hobgoblin()
-    res = resolve_attack(atk, "Cure Wounds — 1d8+2 HP", tgt, Seq([5]))
-    assert res["kind"] == "spell" and res["heal"] is True
-    assert res["damage"] == 7
+def test_resolve_spell_regressions():
+    """Keep parser edge cases compact without hiding which case failed."""
+    cases = [
+        ("cure wounds", "Cure Wounds — 1d8+2 HP", [5], {"heal": True, "damage": 7}),
+        ("healing word", "Healing Word — 1d4+3 HP", [4], {"heal": True, "damage": 7}),
+        ("three darts", "Magic Missile — 3 darts, 1d4+1 force each", [2, 3, 1], {
+            "heal": False, "damage": 9, "dice": [2, 3, 1],
+        }),
+        ("no dice", "Word of Censure", [1], {"damage": 0, "hit": True}),
+        ("healing ignores save", "Regenerate — 4d8 HP (Con DC 12)", [1, 2, 3, 4, 20], {
+            "heal": True, "damage": 10, "save": None,
+        }),
+        ("control spell save", "Hold Person — (Wis DC 15)", [3], {
+            "damage": 0, "save.dc": 15, "save.saved": False,
+        }),
+        ("times sign", "Magic Missile — 3 × 1d4+1 force", [2], {
+            "heal": False, "damage": 3, "dice": [2],
+        }),
+        ("regenerate keyword", "Regenerate — 4d8 (Con DC 12)", [1, 2, 3, 4, 20], {
+            "heal": True, "damage": 10, "save": None,
+        }),
+        ("damage mentions hp", "Inflict Wounds — 2d8 necrotic, reduces max hp", [5, 6], {
+            "heal": False, "damage": 11,
+        }),
+        ("zero darts", "Magic Missile — 0 darts, 1d4+1 force each", [2], {
+            "heal": False, "damage": 3, "dice": [2],
+        }),
+    ]
+    for label, attack, rolls, expected in cases:
+        result = resolve_attack(dent(), attack, hobgoblin(), Seq(rolls))
+        assert result["kind"] == "spell", label
+        for path, value in expected.items():
+            actual = result
+            for key in path.split("."):
+                actual = actual.get(key) if isinstance(actual, dict) else None
+            assert actual == value, f"{label}: {path} was {actual!r}, expected {value!r}"
 
 
-def test_resolve_spell_magic_missile():
-    atk, tgt = dent(), hobgoblin()
-    # '3 darts' rolls 1d4+1 three times: (2, 3, 1) -> 3 + 4 + 2 = 9
-    res = resolve_attack(atk, "Magic Missile — 3 darts, 1d4+1 force each", tgt, Seq([2, 3, 1]))
-    assert res["kind"] == "spell" and res["damage"] == 9
-    assert res["dice"] == [2, 3, 1] and not res["heal"]
-
-
-def test_resolve_spell_without_dice():
-    atk, tgt = dent(), hobgoblin()
-    res = resolve_attack(atk, "Word of Censure", tgt, Seq([1]))
-    assert res["kind"] == "spell" and res["damage"] == 0 and res["hit"]
-
-
-def test_resolve_spell_healing_word():
-    atk, tgt = dent(), hobgoblin()
-    # 'Healing Word' must be detected as a heal (regression: \bheal\b missed
-    # the 'healing' word prefix and dealt damage instead)
-    res = resolve_attack(atk, "Healing Word — 1d4+3 HP", tgt, Seq([4]))
-    assert res["kind"] == "spell" and res["heal"] is True
-    assert res["damage"] == 7
-
-
-def test_resolve_crit_zero_bonus():
-    atk, tgt = dent(), hobgoblin()
-    # the crit re-roll strips the flat bonus ('+0' included) so it is added once
-    res = resolve_attack(atk, "Longsword +7 · 1d8+0 sl", tgt, Seq([20, 3, 5]))
-    assert res["crit"] and res["damage"] == 3 + 5 + 0 == 8
-    assert res["dice"] == [3, 5]
-
-
-def test_resolve_crit_negative_bonus():
-    atk, tgt = dent(), hobgoblin()
-    res = resolve_attack(atk, "Longsword +5 · 1d8-1 sl", tgt, Seq([20, 3, 5]))
-    assert res["crit"] and res["damage"] == 3 + 5 - 1 == 7
-    assert res["dice"] == [3, 5]
-
-
-def test_resolve_heal_with_save_hint_not_halved():
-    atk, tgt = dent(), hobgoblin()
-    # a heal that also carries a (Con DC N) hint must NOT be halved by a save;
-    # the save is reported but ignored for healing spells
-    res = resolve_attack(atk, "Regenerate — 4d8 HP (Con DC 12)", tgt, Seq([1, 2, 3, 4, 20]))
-    assert res["kind"] == "spell" and res["heal"] is True
-    assert res["damage"] == 10
-    assert res.get("save") is None
-
-
-def test_resolve_spell_save_without_dice():
-    atk, tgt = dent(), hobgoblin()
-    # control spells with a save hint but no dice still roll the save
-    res = resolve_attack(atk, "Hold Person — (Wis DC 15)", tgt, Seq([3]))
-    assert res["kind"] == "spell" and res["damage"] == 0
-    assert res["save"]["dc"] == 15 and res["save"]["saved"] is False
-
-
-def test_resolve_spell_times_not_multiplied():
-    atk, tgt = dent(), hobgoblin()
-    # only an explicit 'N darts' keyword multiplies (regression: '3 ×' used to
-    # multiply every damage spell that mentioned a number + times sign)
-    res = resolve_attack(atk, "Magic Missile — 3 × 1d4+1 force", tgt, Seq([2]))
-    assert res["kind"] == "spell" and not res["heal"]
-    assert res["damage"] == 3 and res["dice"] == [2]
-
-
-def test_resolve_spell_regenerate_without_hp():
-    atk, tgt = dent(), hobgoblin()
-    # 'Regenerate' is caught by its own keyword — not by a trailing 'HP' token
-    # (regression: the heal regex matched 'regains' but not 'Regenerate', and
-    # only the 'HP' suffix was masking it in the tests)
-    res = resolve_attack(atk, "Regenerate — 4d8 (Con DC 12)", tgt, Seq([1, 2, 3, 4, 20]))
-    assert res["kind"] == "spell" and res["heal"] is True
-    assert res["damage"] == 10 and res.get("save") is None
-
-
-def test_resolve_damage_spell_mentioning_hp_is_not_heal():
-    atk, tgt = dent(), hobgoblin()
-    # a damage spell whose description happens to mention 'hp' must not flip
-    # into a heal (regression: the bare 'hp'/'hit points' tokens did)
-    res = resolve_attack(atk, "Inflict Wounds — 2d8 necrotic, reduces max hp", tgt, Seq([5, 6]))
-    assert res["kind"] == "spell" and res["heal"] is False
-    assert res["damage"] == 11
-
-
-def test_resolve_spell_zero_darts_not_multiplied():
-    atk, tgt = dent(), hobgoblin()
-    res = resolve_attack(atk, "Magic Missile — 0 darts, 1d4+1 force each", tgt, Seq([2]))
-    assert res["kind"] == "spell" and not res["heal"]
-    assert res["damage"] == 3 and res["dice"] == [2]
-
-
-def test_resolve_crit_multi_die_no_bonus():
-    atk, tgt = dent(), hobgoblin()
-    # '2d6' with no flat bonus — the crit re-roll must still strip '+0'/nothing
-    res = resolve_attack(atk, "Maul +5 · 2d6 bl", tgt, Seq([20, 2, 3, 4, 1]))
-    assert res["crit"] and res["damage"] == 2 + 3 + 4 + 1 == 10
-    assert res["dice"] == [2, 3, 4, 1] and res["dice_bonus"] == 0
+def test_resolve_critical_damage_variants():
+    cases = [
+        ("zero bonus", "Longsword +7 · 1d8+0 sl", [20, 3, 5], 8, [3, 5], 0),
+        ("negative bonus", "Longsword +5 · 1d8-1 sl", [20, 3, 5], 7, [3, 5], -1),
+        ("multiple dice", "Maul +5 · 2d6 bl", [20, 2, 3, 4, 1], 10, [2, 3, 4, 1], 0),
+    ]
+    for label, attack, rolls, damage, dice, bonus in cases:
+        result = resolve_attack(dent(), attack, hobgoblin(), Seq(rolls))
+        assert result["crit"], label
+        assert (result["damage"], result["dice"], result["dice_bonus"]) == (damage, dice, bonus), label
 
 
 def test_short_label():
@@ -342,6 +288,26 @@ def test_parse_ddb_urls_accepts_multiline_paste_and_deduplicates():
     assert parse_ddb_urls(pasted) == [12, 34]
 
 
+DEFAULT_STATS = {str(index): 10 for index in range(1, 7)}
+
+
+def ddb_payload(name="Test", **overrides):
+    """Build the stable part of a D&D Beyond response for focused parser tests."""
+    character = {
+        "name": name,
+        "stats": dict(DEFAULT_STATS),
+        "baseHitPoints": 10,
+        "inventory": [],
+        "modifiers": {},
+    }
+    character.update(overrides)
+    return {"character": character}
+
+
+def equipped_item(name, **definition):
+    return {"equipped": True, "definition": {"name": name, **definition}}
+
+
 REALISTIC = {
     "character": {
         "name": "Baldrik",
@@ -429,223 +395,122 @@ def test_extract_combatant_sparse():
 
 
 def test_extract_combatant_stats_int_list():
-    data = {
-        "character": {
-            "name": "Hasty",
-            "stats": [15, 14, 13, 12, 10, 8],
-            "baseHitPoints": 10,
-            "inventory": [],
-            "modifiers": {},
-        }
-    }
-    c = extract_combatant(1, data)
+    c = extract_combatant(1, ddb_payload("Hasty", stats=[15, 14, 13, 12, 10, 8]))
     assert c.init_mod == 2 and c.stats[1] == 15 and c.stats[6] == 8
 
 
 def test_extract_combatant_weapon_without_attack_fields_skipped():
-    data = {
-        "character": {
-            "name": "Plain",
-            "stats": {"1": 10, "2": 10, "3": 10, "4": 10, "5": 10, "6": 10},
-            "inventory": [{"equipped": True, "definition": {"name": "Lantern", "damage": None}}],
-            "modifiers": {},
-        }
-    }
+    data = ddb_payload("Plain", inventory=[equipped_item("Lantern", damage=None)])
     c = extract_combatant(2, data)
     assert c.attacks == []
 
 
 def test_extract_combatant_spell_without_definition():
-    data = {
-        "character": {
-            "name": "Sparrow",
-            "stats": {"1": 10, "2": 10, "3": 10, "4": 10, "5": 10, "6": 10},
-            "spells": {"0": [{"definition": None}, {"definition": {"name": "Cure Wounds"}}]},
-            "modifiers": {},
-        }
-    }
+    data = ddb_payload(
+        "Sparrow",
+        spells={"0": [{"definition": None}, {"definition": {"name": "Cure Wounds"}}]},
+    )
     c = extract_combatant(3, data)
     assert c.spells == ["Cure Wounds"]
 
 
 def test_extract_combatant_multi_hit_dice():
-    data = {
-        "character": {
-            "name": "Dicey",
-            "stats": {"1": 10, "2": 10, "3": 10, "4": 10, "5": 10, "6": 10},
-            "hitPointDice": {"8": 3, "6": 2},
-            "modifiers": {},
-        }
-    }
-    c = extract_combatant(4, data)
+    c = extract_combatant(4, ddb_payload("Dicey", hitPointDice={"8": 3, "6": 2}))
     assert c.hit_dice == "3d8, 2d6"
 
 
 def test_extract_combatant_hit_dice_sorted_descending():
-    data = {
-        "character": {
-            "name": "Dicey",
-            "stats": {"1": 10, "2": 10, "3": 10, "4": 10, "5": 10, "6": 10},
-            # inserted smallest-first; output must still be largest-die-first
-            "hitPointDice": {"6": 2, "8": 3},
-            "modifiers": {},
-        }
-    }
-    c = extract_combatant(4, data)
+    # Inserted smallest-first; output must still be largest-die-first.
+    c = extract_combatant(4, ddb_payload("Dicey", hitPointDice={"6": 2, "8": 3}))
     assert c.hit_dice == "3d8, 2d6"
 
 
 def test_extract_combatant_stats_dict_unordered():
-    data = {
-        "character": {
-            "name": "Muddled",
-            "stats": {"6": 8, "1": 15, "3": 12, "5": 10, "4": 10, "2": 14},
-            "baseHitPoints": 10,
-            "inventory": [],
-            "modifiers": {},
-        }
-    }
+    data = ddb_payload("Muddled", stats={"6": 8, "1": 15, "3": 12, "5": 10, "4": 10, "2": 14})
     c = extract_combatant(5, data)
     assert c.init_mod == 2 and c.stats[1] == 15 and c.stats[6] == 8
     assert c.stats == {1: 15, 2: 14, 3: 12, 4: 10, 5: 10, 6: 8}
 
 
 def test_extract_combatant_armor_type_id_as_string():
-    data = {
-        "character": {
-            "name": "Bouncy",
-            "stats": {"1": 10, "2": 12, "3": 10, "4": 10, "5": 10, "6": 10},
-            "baseHitPoints": 10,
-            "inventory": [
-                {"equipped": True, "definition": {"name": "Shield", "armorClass": 2, "armorTypeId": "4"}},
-            ],
-            "modifiers": {},
-        }
-    }
+    data = ddb_payload(
+        "Bouncy",
+        stats={**DEFAULT_STATS, "2": 12},
+        inventory=[equipped_item("Shield", armorClass=2, armorTypeId="4")],
+    )
     c = extract_combatant(6, data)
     assert c.ac == 10 + 1 + 2  # 10 + DEX + shield (armorTypeId came back as a string)
 
 
 def test_extract_combatant_attack_bonus_trusted():
-    data = {
-        "character": {
-            "name": "Vexed",
-            "stats": {"1": 10, "2": 10, "3": 10, "4": 10, "5": 10, "6": 10},
-            "baseHitPoints": 10,
-            "inventory": [
-                {"equipped": True, "definition": {
-                    "name": "Flame Tongue", "damage": {"diceString": "2d6"}, "damageType": "Fire",
-                    "attackBonus": 9,
-                }},
-            ],
-            "modifiers": {},
-        }
-    }
+    data = ddb_payload(
+        "Vexed",
+        inventory=[equipped_item(
+            "Flame Tongue", damage={"diceString": "2d6"}, damageType="Fire", attackBonus=9,
+        )],
+    )
     c = extract_combatant(7, data)
     assert c.attacks[0].startswith("Flame Tongue +9 · 2d6"), c.attacks
 
 
 def test_extract_combatant_negative_attack_bonus_renders():
-    data = {
-        "character": {
-            "name": "Vexed",
-            "stats": {"1": 16, "2": 10, "3": 10, "4": 10, "5": 10, "6": 10},
-            "baseHitPoints": 10,
-            "inventory": [
-                {"equipped": True, "definition": {
-                    "name": "Cursed Blade", "damage": {"diceString": "1d8"}, "damageType": "Slashing",
-                    "attackBonus": -2,
-                }},
-            ],
-            "modifiers": {},
-        }
-    }
+    data = ddb_payload(
+        "Vexed",
+        stats={**DEFAULT_STATS, "1": 16},
+        inventory=[equipped_item(
+            "Cursed Blade", damage={"diceString": "1d8"}, damageType="Slashing", attackBonus=-2,
+        )],
+    )
     c = extract_combatant(7, data)
     assert c.attacks[0].startswith("Cursed Blade -2 · 1d8"), c.attacks
 
 
 def test_extract_combatant_damage_bonus_not_double_counted_to_hit():
-    data = {
-        "character": {
-            "name": "Smash",
-            "stats": {"1": 16, "2": 10, "3": 10, "4": 10, "5": 10, "6": 10},
-            "baseHitPoints": 10,
-            "proficiencyBonus": 2,
-            "inventory": [
-                {"equipped": True, "definition": {
-                    "name": "Greataxe", "damage": {"diceString": "1d12"}, "damageType": "Slashing",
-                    "damageBonus": 3,
-                }},
-            ],
-            "modifiers": {},
-        }
-    }
+    data = ddb_payload(
+        "Smash",
+        stats={**DEFAULT_STATS, "1": 16},
+        proficiencyBonus=2,
+        inventory=[equipped_item(
+            "Greataxe", damage={"diceString": "1d12"}, damageType="Slashing", damageBonus=3,
+        )],
+    )
     c = extract_combatant(7, data)
     # the flat +3 damage bonus helps damage, not the to-hit roll
     assert c.attacks[0].startswith("Greataxe +5 · 1d12+6"), c.attacks
 
 
 def test_extract_combatant_explicit_zero_attack_bonus_trusted():
-    data = {
-        "character": {
-            "name": "Weird",
-            "stats": {"1": 16, "2": 10, "3": 10, "4": 10, "5": 10, "6": 10},
-            "baseHitPoints": 10,
-            "proficiencyBonus": 2,
-            "inventory": [
-                {"equipped": True, "definition": {
-                    "name": "Weapon", "damage": {"diceString": "1d6"}, "damageType": "Bludgeoning",
-                    "attackBonus": 0,
-                }},
-            ],
-            "modifiers": {},
-        }
-    }
+    data = ddb_payload(
+        "Weird",
+        stats={**DEFAULT_STATS, "1": 16},
+        proficiencyBonus=2,
+        inventory=[equipped_item(
+            "Weapon", damage={"diceString": "1d6"}, damageType="Bludgeoning", attackBonus=0,
+        )],
+    )
     c = extract_combatant(9, data)
     assert c.attacks[0].startswith("Weapon +0 · 1d6"), c.attacks
 
 
 def test_extract_combatant_heavy_armor_ignores_negative_dex():
-    data = {
-        "character": {
-            "name": "Plod",
-            "stats": {"1": 10, "2": 6, "3": 10, "4": 10, "5": 10, "6": 10},
-            "baseHitPoints": 10,
-            "inventory": [
-                {"equipped": True, "definition": {"name": "Plate", "armorClass": 18, "armorTypeId": 3}},
-            ],
-            "modifiers": {},
-        }
-    }
+    data = ddb_payload(
+        "Plod",
+        stats={**DEFAULT_STATS, "2": 6},
+        inventory=[equipped_item("Plate", armorClass=18, armorTypeId=3)],
+    )
     c = extract_combatant(9, data)
     assert c.ac == 18, c.ac  # heavy armour ignores DEX entirely, even a -2 penalty
 
 
 def test_extract_combatant_hit_dice_non_numeric_keys_filtered():
-    data = {
-        "character": {
-            "name": "Dicey",
-            "stats": {"1": 10, "2": 10, "3": 10, "4": 10, "5": 10, "6": 10},
-            "hitPointDice": {"8": 3, "6": 2, "foo": 2, "d10": 1},
-            "modifiers": {},
-        }
-    }
-    c = extract_combatant(4, data)
+    dice = {"8": 3, "6": 2, "foo": 2, "d10": 1}
+    c = extract_combatant(4, ddb_payload("Dicey", hitPointDice=dice))
     assert c.hit_dice == "3d8, 2d6"
 
 
 def test_extract_combatant_negative_removed_hp_clamped():
-    data = {
-        "character": {
-            "name": "Hearty",
-            "stats": {"1": 16, "2": 10, "3": 14, "4": 10, "5": 10, "6": 10},
-            "baseHitPoints": 10,
-            "removedHitPoints": -5,
-            "inventory": [],
-            "modifiers": {},
-        }
-    }
-    c = extract_combatant(8, data)
+    stats = {**DEFAULT_STATS, "1": 16, "3": 14}
+    c = extract_combatant(8, ddb_payload("Hearty", stats=stats, removedHitPoints=-5))
     assert c.hp == c.max_hp  # a negative 'removed' value must not push hp above max
 
 
@@ -783,21 +648,10 @@ def test_party_context_includes_levels_and_strength_signals():
 
 
 def test_openai_response_preserves_compact_line_breaks():
-    import json
-
-    import openai_client
-
-    class Response:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            return False
-
-        def read(self):
-            return json.dumps({"choices": [{"message": {"content": "Line one\nLine two\n\n\nLine three"}}]}).encode()
-
-    with mock.patch.object(urllib.request, "urlopen", return_value=Response()):
+    response = _Resp(json.dumps({
+        "choices": [{"message": {"content": "Line one\nLine two\n\n\nLine three"}}]
+    }).encode())
+    with mock.patch.object(urllib.request, "urlopen", return_value=response):
         answer = openai_client.chat(
             "question", "context", config={"api_key": "test", "url": "https://example.test"}
         )
@@ -805,13 +659,11 @@ def test_openai_response_preserves_compact_line_breaks():
 
 
 def test_openai_encounter_plan_uses_catalog_only_structured_output():
-    import openai_client
-
     response = _Resp(json.dumps({
         "choices": [{"message": {"content": json.dumps({
             "title": "Corrupted Order",
             "theme": "fallen knights",
-            "difficulty": "Hard",
+            "pressure": "High",
             "monsters": [{"name": "Knight", "count": 2}],
         })}}]
     }).encode())
@@ -829,9 +681,45 @@ def test_openai_encounter_plan_uses_catalog_only_structured_output():
             config={"api_key": "test", "url": "https://example.test"},
         )
     assert plan["monsters"] == [{"name": "Knight", "count": 2}]
+    assert plan["pressure"] == "High"
     schema = requests[0]["response_format"]["json_schema"]
     assert schema["strict"] is True
     assert "Knight" in requests[0]["messages"][1]["content"]
+
+
+def test_openai_config_layers_dotenv_and_local_options():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "llm_config.json")
+        local_path = os.path.join(tmp, "llm_config.local.json")
+        env_path = os.path.join(tmp, ".env")
+        with open(path, "w", encoding="utf-8") as config_file:
+            json.dump({"model": "base", "options": {"temperature": 0.1, "max_tokens": 80}}, config_file)
+        with open(local_path, "w", encoding="utf-8") as local_file:
+            json.dump({"model": "local", "options": {"max_tokens": 120}}, local_file)
+        with open(env_path, "w", encoding="utf-8") as env_file:
+            env_file.write('WARD_TEST_KEY="from file"\n')
+        with mock.patch.dict(os.environ, {}, clear=True):
+            config = openai_client.load_config(path)
+            assert os.environ["WARD_TEST_KEY"] == "from file"
+    assert config == {"model": "local", "options": {"temperature": 0.1, "max_tokens": 120}}
+
+
+def test_openai_shared_response_errors_are_normalized():
+    config = {"api_key": "test", "url": "https://example.test"}
+    failures = [
+        (urllib.error.URLError("offline"), "not reachable"),
+        (_Resp(b"not json"), "invalid JSON"),
+        (_Resp(json.dumps({"choices": []}).encode()), "empty answer"),
+    ]
+    for response, expected in failures:
+        patch = {"side_effect": response} if isinstance(response, Exception) else {"return_value": response}
+        with mock.patch.object(urllib.request, "urlopen", **patch):
+            try:
+                openai_client.chat("question", "context", config=config)
+            except RuntimeError as exc:
+                assert expected in str(exc), (expected, str(exc))
+            else:
+                raise AssertionError(f"expected {expected!r} error")
 
 
 def test_shifted_letter_bindings_use_terminal_key_events():
@@ -909,13 +797,52 @@ def test_campaign_book_roundtrip_preserves_campaign_owned_party():
     assert loaded["campaigns"]["Stone Sea"]["notes"] == "North wind"
 
 
+def test_campaign_book_sanitizes_malformed_state():
+    assert campaign_store.normalize_book(None) == campaign_store.empty_book()
+    assert campaign_store.normalize_book({"campaigns": []}) == campaign_store.empty_book()
+
+    book = campaign_store.normalize_book({
+        "active": "missing",
+        "campaigns": {
+            "": {},
+            "Broken": "not a campaign",
+            "  Keepers  ": {
+                "party": [None, "", "  Borin  ", {"ddb_id": "12"}, {"ddb_id": "12"}],
+                "ruleset": None,
+                "notes": None,
+            },
+        },
+    })
+    assert book == {
+        "version": 2,
+        "active": "Keepers",
+        "campaigns": {
+            "Keepers": {
+                "party": [{"name": "Borin"}, {"ddb_id": 12}],
+                "ruleset": "2014",
+                "notes": "",
+            }
+        },
+    }
+    assert campaign_store.party_for(book, "missing") == []
+
+    with tempfile.TemporaryDirectory() as tmp:
+        invalid_path = os.path.join(tmp, "campaigns.json")
+        with open(invalid_path, "w", encoding="utf-8") as campaign_file:
+            campaign_file.write("not json")
+        assert campaign_store.read_book(invalid_path) == campaign_store.empty_book()
+
+
 def test_startup_menu_is_onboarding_when_campaign_book_is_empty():
     from app import BattleApp
 
     options, prompt, subtitle = BattleApp()._startup_menu(campaign_store.empty_book(), None, 0)
     assert [key for key, _label in options] == ["setup", "sample", "blank", "quit"]
     assert prompt == "Open your DM folio"
-    assert "campaign keeps the party" in subtitle.lower()
+    assert "physical table remains authoritative" in subtitle.lower()
+
+    options, _prompt, _subtitle = BattleApp()._startup_menu(campaign_store.empty_book(), None, 2)
+    assert [key for key, _label in options] == ["setup", "sample", "blank", "data", "quit"]
 
 
 def test_returning_startup_prioritizes_resume_and_hides_empty_prepared_action():
@@ -938,9 +865,9 @@ def test_returning_startup_prioritizes_resume_and_hides_empty_prepared_action():
         options, prompt, subtitle = app._startup_menu(data, current, 0)
     keys = [key for key, _label in options]
     assert keys[0] == "resume"
-    assert "open:Lost Mine" in keys
+    assert "run:Lost Mine" in keys and "prepare:Lost Mine" in keys
     assert "prepared" not in keys and "campaigns" not in keys
-    assert prompt == "Choose tonight's starting point"
+    assert prompt == "Resume, run, or prepare"
     assert "1 adventurer" in subtitle
 
 
@@ -1013,6 +940,52 @@ def test_encounter_store_tracks_current_fight_per_campaign():
     assert lost["status"] == "active" and curse["status"] == "active"
 
 
+def test_encounter_store_repairs_malformed_state():
+    snapshot = {"combatants": [], "round": 2}
+    assert encounter_store.normalize_store(None) == encounter_store.empty_store()
+    data = encounter_store.normalize_store({
+        "last_active": "missing",
+        "current": {encounter_store.NO_CAMPAIGN: "kept", "bad": "missing"},
+        "encounters": {
+            "": {"snapshot": snapshot},
+            "kept": {
+                "campaign": 42,
+                "name": "  ",
+                "status": "unexpected",
+                "snapshot": snapshot,
+                "source_template": 99,
+            },
+            "stray": {"campaign": "Keepers", "status": "active", "snapshot": snapshot},
+            "broken": {"snapshot": "not a snapshot"},
+        },
+    })
+    assert set(data["encounters"]) == {"kept", "stray"}
+    assert data["current"] == {encounter_store.NO_CAMPAIGN: "kept"}
+    assert data["last_active"] == "kept"
+    assert data["encounters"]["kept"]["snapshot"] == snapshot
+    assert data["encounters"]["kept"]["name"] == "Untitled encounter"
+    assert data["encounters"]["kept"]["campaign"] is None
+    assert data["encounters"]["kept"]["status"] == "active"
+    assert data["encounters"]["kept"]["source_template"] == "99"
+    assert data["encounters"]["stray"]["status"] == "paused"
+
+
+def test_encounter_store_updates_and_rejects_missing_records():
+    data = encounter_store.empty_store()
+    record = encounter_store.create_record(
+        data, "Keepers", "Goblin Road", {"combatants": [], "round": 1}, source_template="Road Ambush",
+    )
+    updated = {"combatants": [{"name": "Goblin"}], "round": 3}
+    assert record["source_template"] == "Road Ambush"
+    assert encounter_store.update_record(data, record["id"], updated)
+    assert record["snapshot"] == updated
+    assert encounter_store.activate_record(data, "missing") is None
+    assert not encounter_store.update_record(data, "missing", updated)
+    assert not encounter_store.complete_record(data, "missing")
+    assert not encounter_store.rename_record(data, "missing", "Name")
+    assert not encounter_store.move_record(data, "missing", None)
+
+
 def test_completed_encounter_stays_archived_and_can_be_reactivated():
     data = encounter_store.empty_store()
     record = encounter_store.create_record(data, "Lost Mine", "Goblin Ambush", {"combatants": [], "round": 4})
@@ -1057,11 +1030,42 @@ def test_legacy_resume_point_migrates_into_encounter_store():
     assert record["snapshot"]["round"] == 3
 
 
-def main() -> None:
-    fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
-    for fn in fns:
-        fn()
-    print(f"TESTS OK ({len(fns)} passed)")
+def test_ward_backup_roundtrip_restores_all_user_data():
+    campaigns = campaign_store.normalize_book({
+        "active": "Keepers",
+        "campaigns": {"Keepers": {"party": [{"name": "Borin"}], "notes": "Gate code", "ruleset": "2014"}},
+    })
+    encounters = encounter_store.empty_store()
+    encounter_store.create_record(encounters, "Keepers", "North Gate", {"combatants": [], "round": 3})
+    templates = {"templates": {"Road Ambush": {"snapshot": {"combatants": []}}}}
+
+    with tempfile.TemporaryDirectory() as tmp:
+        backup_dir = os.path.join(tmp, "backups")
+        backup_path = ward_backup.write_backup(backup_dir, campaigns, encounters, templates)
+        assert ward_backup.list_backups(backup_dir) == [backup_path]
+
+        campaign_path = os.path.join(tmp, "campaigns.json")
+        encounter_path = os.path.join(tmp, "campaign-encounters.json")
+        template_path = os.path.join(tmp, "encounters.json")
+        restored = ward_backup.restore_backup(backup_path, campaign_path, encounter_path, template_path)
+        assert restored["format"] == "ward-data-backup"
+        assert campaign_store.read_book(campaign_path) == campaigns
+        assert encounter_store.read_store(encounter_path) == encounter_store.normalize_store(encounters)
+        with open(template_path, encoding="utf-8") as template_file:
+            assert json.load(template_file) == templates
+
+
+def test_ward_backup_rejects_unrelated_json():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "not-ward.json")
+        with open(path, "w", encoding="utf-8") as backup_file:
+            json.dump({"version": 1}, backup_file)
+        try:
+            ward_backup.read_backup(path)
+        except ValueError as exc:
+            assert "not a Ward data backup" in str(exc)
+        else:
+            raise AssertionError("unrelated JSON should not be restored")
 
 
 # ---------------------------------------------------------------------------
@@ -1265,6 +1269,16 @@ def test_srd_spells_fetch_and_cache():
             out2 = srd_client.get_srd_spells(force=False)
             assert [m["name"] for m in out2] == [m["name"] for m in out]
             assert calls == []
+
+
+def main() -> None:
+    tests = [
+        value for name, value in sorted(globals().items())
+        if name.startswith("test_") and callable(value)
+    ]
+    for test in tests:
+        test()
+    print(f"TESTS OK ({len(tests)} passed)")
 
 
 if __name__ == "__main__":

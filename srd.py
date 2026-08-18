@@ -23,7 +23,7 @@ import urllib.request
 # Open5e v2 API. v1's `actions` left `damage` null; v2 carries the full
 # statblock text we parse below.
 BASE = "https://api.open5e.com/v2/"
-HEADERS = {"User-Agent": "vtt-aug-battle-tracker/1.0"}
+HEADERS = {"User-Agent": "ward-dm/1.0"}
 
 # The freely redistributable SRD documents (2014 + 2024 rules). Other documents
 # in the API are third-party/homebrew and intentionally excluded.

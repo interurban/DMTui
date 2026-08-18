@@ -1,4 +1,4 @@
-"""Modal screens for the battle tracker — a number prompt, a pick list, a
+"""Modal screens for Ward — a number prompt, a pick list, a
 text prompt, and the help screen."""
 
 from __future__ import annotations
@@ -214,7 +214,7 @@ class PartyPreviewModal(ModalScreen[str]):
 
 
 class EncounterPreviewModal(ModalScreen[str]):
-    """Preview an AI encounter before it changes the live encounter."""
+    """Preview an assisted suggestion before it changes the live encounter."""
 
     BINDINGS = [
         ("enter", "accept", "Add encounter"),
@@ -228,10 +228,13 @@ class EncounterPreviewModal(ModalScreen[str]):
         self._lines = lines
 
     def compose(self) -> ComposeResult:
-        title = str(self._plan.get("title") or "AI ENCOUNTER").upper()
+        title = str(self._plan.get("title") or "ENCOUNTER SUGGESTION").upper()
         theme = str(self._plan.get("theme") or "")
-        difficulty = str(self._plan.get("difficulty") or "Unknown")
-        detail = f"[dim]{theme}[/]\n[bold #a8d0ff]Difficulty:[/] {difficulty}\n\n" + "\n".join(self._lines)
+        pressure = str(self._plan.get("pressure") or self._plan.get("difficulty") or "Unknown")
+        detail = (
+            f"[dim]{theme}[/]\n[bold #a8d0ff]Rough pressure:[/] {pressure}  "
+            "[dim]DM judgment, not balancing[/]\n\n" + "\n".join(self._lines)
+        )
         with Container(classes="modal-box"):
             yield Static(f"[bold #e6ebf2]{title}[/]", classes="modal-title")
             yield Static(detail)
@@ -251,7 +254,7 @@ class EncounterPreviewModal(ModalScreen[str]):
 
 
 class GeneratingModal(ModalScreen[None]):
-    """Blocks input while an AI encounter plan is being generated."""
+    """Block input while an encounter suggestion is being generated."""
 
     BINDINGS = [("escape", "cancel", "Cancel")]
 
@@ -556,29 +559,29 @@ class HelpModal(ModalScreen[None]):
     BINDINGS = [("escape", "cancel", "Cancel"), ("enter", "cancel", "Cancel")]
 
     def compose(self) -> ComposeResult:
-        with Container(classes="modal-box"):
+        with Container(classes="modal-box help-modal"):
             yield Static(
-                "[bold #e6ebf2]Battle Tracker[/]\n\n"
-                "[#8a93a3]A terminal combat tracker for D&D 5e DMs.\n"
-                "Everything lives on one screen: map, initiative, detail.[/]\n\n"
-                "[bold #a8d0ff]Keys[/]\n"
-                "  [bold]↑↓[/]/[bold]k j[/] select   [bold]←→[/] ±1 HP\n"
-                "  [bold]s[/] switch   [bold]Ctrl+1[/] combat   [bold]Ctrl+2[/] DM Screen   [bold]Ctrl+3[/] party\n"
-                "  [bold]n[/] next turn   [bold]shift+i[/] initiative pass   [bold]+[/] duplicate monster\n"
-                "  [bold]Enter[/]/[bold]a[/] attack   [bold]d[/]/[bold]h[/] damage / heal (type amount, [bold]Enter[/] apply, [bold]Esc[/] cancel)\n"
-                "  [bold]0–9[/]/[bold]Backspace[/] edit the inline HP amount\n"
-                "  [bold]c[/] condition   [bold]shift+c[/] campaign   [bold]m[/] quick monster   [bold]x[/] remove\n"
-                "  [bold]ctrl+m[/]/[bold]b[/]/[bold]shift+m[/] monster library (SRD)   [bold]v[/] spellbook   [bold]r[/] roll init   [bold]shift+r[/] reset\n"
-                "  [bold]t[/] type initiative inline\n"
-                "  [bold]i[/] import PC   [bold]f[/] find   [bold]e[/] edit   [bold]shift+e[/] AI encounter   [bold]p[/] add PC   [bold]ctrl+n[/] another encounter\n"
-                "  [bold]ctrl+e[/] prepared encounters   [bold]shift+c[/] campaign home + saved encounters\n"
-                "  [bold]s[/] cycle views   [bold]ctrl+1/2/3[/] choose view   live encounter remembered automatically\n"
-                "  [bold]u[/]/[bold]shift+u[/] undo/redo   [bold]/[/] chat or [bold]/roll 2d6+4[/]   [bold]?[/] help\n"
-                "  [bold]q[/] quit   [bold]Esc[/] drop token / cancel\n\n"
-                "[bold #a8d0ff]Map[/]\n"
-                "  click a token to select it; [bold]g[/] grabs, arrows place it\n"
-                "  [bold][#c9a227]▶ gold[/][/] = turn   [bold][#5b6471]✝ dim[/][/] = down\n"
-                "  blue = PC · red = monster · green = placing",
+                "[bold #a8d0ff]WARD[/]  [#8a93a3]A PRIVATE, TABLE-SIDE TOOL FOR THE DM[/]\n"
+                "[#8a93a3]Ward remembers volatile state and retrieves references.\n"
+                "Your physical table and your rulings remain authoritative.[/]\n\n"
+                "[bold #a8d0ff]RUN THE ENCOUNTER[/]\n"
+                "  [bold]↑↓ / k j[/]: select   ·   [bold]←→[/]: adjust HP\n"
+                "  [bold]n[/]: next turn   ·   [bold]shift+i[/]: initiative pass   ·   [bold]+[/]: duplicate monster\n"
+                "  [bold]Enter / a[/]: attack   ·   [bold]d / h[/]: damage / heal; type amount, Enter applies\n"
+                "  [bold]c[/]: condition   ·   [bold]r[/]: monster init   ·   [bold]t[/]: type init   ·   [bold]u / shift+u[/]: undo / redo\n\n"
+                "[bold #a8d0ff]REFERENCE[/]\n"
+                "  [bold]s[/]: cycle Combat / DM Screen / Party   ·   [bold]Ctrl+1/2/3[/]: choose directly\n"
+                "  [bold]/[/]: quick lookup   ·   [bold]/roll 2d6+4[/]: local roll   ·   [bold]f[/]: find creature or map note\n\n"
+                "[bold #a8d0ff]PREPARE AND ADJUST[/]\n"
+                "  [bold]m[/]: quick monster   ·   [bold]ctrl+m[/]: library   ·   [bold]v[/]: spellbook\n"
+                "  [bold]i[/]: import PC   ·   [bold]p[/]: add PC   ·   [bold]e[/]: edit   ·   [bold]x[/]: remove\n"
+                "  [bold]shift+e[/]: encounter assistant (rough suggestion)   ·   [bold]ctrl+e[/]: monster setups\n"
+                "  [bold]ctrl+n[/]: another encounter   ·   [bold]shift+r[/]: reset encounter\n\n"
+                "[bold #a8d0ff]CAMPAIGN AND WARD DATA[/]\n"
+                "  [bold]shift+c[/]: campaign folio, encounters, party, notes, backup and restore\n"
+                "  Ward remembers live encounters automatically.   [bold]?[/]: help   ·   [bold]q[/]: quit\n\n"
+                "[dim]The map is a quick note that mirrors the physical table—not a virtual tabletop.\n"
+                "Click to select; [bold]g[/] grabs and arrows place. Blue = PC · red = monster.[/]",
                 classes="modal-help",
             )
             yield Static("[dim][bold]Enter[/] or [bold]Esc[/] close[/]", classes="modal-hint")

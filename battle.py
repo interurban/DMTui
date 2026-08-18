@@ -1,8 +1,8 @@
-"""Encounter data for the battle tracker demo.
+"""Encounter data for Ward.
 
-Simulated-but-real data: a level-3 party ambushed by goblins on the old
-toll road. Health values, initiative, and conditions are hand-tuned to make
-the demo interesting.
+Sample data: a level-3 party ambushed by goblins on the old toll road. Health
+values, initiative, and conditions are hand-tuned to make the first-run example
+useful.
 """
 
 from __future__ import annotations

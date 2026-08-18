@@ -6,6 +6,7 @@ encounter.json.tmp
 encounters.json
 campaign-encounters.json
 campaign-encounters.json.tmp
+ward-backups/
 *.pyc
 campaigns.json
 .cache/

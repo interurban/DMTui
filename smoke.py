@@ -4,9 +4,10 @@ import asyncio
 import json
 import os
 import random
+import shutil
 
 # Keep the run fully offline: never auto-fetch the SRD library from Open5e.
-os.environ.setdefault("VTT_OFFLINE", "1")
+os.environ.setdefault("WARD_OFFLINE", "1")
 
 import app as appmod
 import ddb
@@ -123,6 +124,8 @@ async def main() -> None:
     appmod.SAVE_PATH = os.path.join(SHOTS, "encounter-test.json")
     appmod.ENCOUNTER_PATH = os.path.join(SHOTS, "encounters-test.json")
     appmod.CAMPAIGN_ENCOUNTERS_PATH = os.path.join(SHOTS, "campaign-encounters-test.json")
+    appmod.BACKUP_DIR = os.path.join(SHOTS, "ward-backups-test")
+    shutil.rmtree(appmod.BACKUP_DIR, ignore_errors=True)
     for p in (appmod.CAMPAIGN_PATH, appmod.SAVE_PATH, appmod.ENCOUNTER_PATH, appmod.CAMPAIGN_ENCOUNTERS_PATH):
         if os.path.exists(p):
             os.remove(p)
@@ -134,8 +137,6 @@ async def main() -> None:
         await _wait_modal(pilot, TextModal)
         app.screen.query_one(Input).value = "My Campaign"
         await pilot.press("enter")
-        await _wait_modal(pilot, ListModal)
-        await pilot.press("down", "enter")  # 2014 rules
         await _wait_modal(pilot, ListModal)
         await pilot.press("enter")  # add the party now
         await _wait_modal(pilot, PartyImportModal)
@@ -618,7 +619,9 @@ async def main() -> None:
         # Campaign menu -> scratchpad stores multiline notes in campaigns.json.
         await pilot.press("C")
         await _wait_modal(pilot, ListModal)
-        await pilot.press(*(["down"] * 6), "enter")
+        await pilot.press(*(["down"] * 4), "enter")  # campaign details
+        await _wait_modal(pilot, ListModal)
+        await pilot.press("down", "enter")  # session notes
         await pilot.pause()
         note = app.screen.query_one(TextArea)
         note.load_text("Guard = Harlan\nDoor code 417")
@@ -627,31 +630,43 @@ async def main() -> None:
         with open(appmod.CAMPAIGN_PATH) as f:
             campaigns = json.load(f)
         assert campaigns["campaigns"][campaigns["active"]]["notes"] == "Guard = Harlan\nDoor code 417"
-        await pilot.press("C")
         await _wait_modal(pilot, ListModal)
-        await pilot.press(*(["down"] * 6), "enter")
+        await pilot.press("down", "enter")
         await pilot.pause()
         assert app.screen.query_one(TextArea).text == "Guard = Harlan\nDoor code 417"
         await pilot.press("escape")
-        await pilot.pause()
+        await _wait_modal(pilot, ListModal)
+        await pilot.press("escape")  # back to campaign home
+        await _wait_modal(pilot, ListModal)
 
-        # Ruleset is campaign-owned and editable without rewriting the live fight.
-        await pilot.press("C")
+        # The rules reference is secondary metadata and never rewrites the live fight.
+        await pilot.press(*(["down"] * 4), "enter")  # campaign details
         await _wait_modal(pilot, ListModal)
-        await pilot.press(*(["down"] * 5), "enter")
+        await pilot.press("down", "down", "enter")  # rules reference
         await _wait_modal(pilot, ListModal)
-        await pilot.press("enter")  # 2024 rules
+        await pilot.press("enter")  # 2024 reference
         await pilot.pause()
         with open(appmod.CAMPAIGN_PATH) as f:
             campaigns = json.load(f)
         assert campaigns["campaigns"]["My Campaign"]["ruleset"] == "2024"
+        await _wait_modal(pilot, ListModal)
+        await pilot.press("escape")  # details -> campaign home
+        await _wait_modal(pilot, ListModal)
+
+        # Ward can export all user-owned state from the campaign folio.
+        await pilot.press(*(["down"] * 5), "enter")
+        await _wait_modal(pilot, ListModal)
+        await pilot.press("enter")
+        await _wait_modal(pilot, ListModal)
+        assert len(os.listdir(appmod.BACKUP_DIR)) == 1
+        await pilot.press("escape")
+        await _wait_modal(pilot, ListModal)
 
         # Create a campaign from the current party, then switch into it.
-        await pilot.press("C")
-        await _wait_modal(pilot, ListModal)
         app.save_screenshot(os.path.join(SHOTS, "31-campaign-menu.png"))
-        await pilot.press(*(["down"] * 8))  # -> Create a campaign from this party
-        await pilot.press("enter")
+        await pilot.press(*(["down"] * 6), "enter")  # switch campaign
+        await _wait_modal(pilot, ListModal)
+        await pilot.press("down", "down", "enter")  # create from party on table
         await _wait_modal(pilot, TextModal)
         app.screen.query_one(Input).value = "Test Campaign"
         await pilot.press("enter")
@@ -666,7 +681,7 @@ async def main() -> None:
         # Creating the campaign keeps the current prepared fight and opens its
         # campaign home. Starting another encounter preserves that fight as paused.
         await _wait_modal(pilot, ListModal)
-        await pilot.press("down", "down", "enter")
+        await pilot.press("down", "enter")
         await _wait_modal(pilot, TextModal)
         app.screen.query_one(Input).value = "Redbrand Cellar"
         await pilot.press("enter")
@@ -724,7 +739,7 @@ async def main() -> None:
         current_id = app._session_encounter_id
         await pilot.press("C")
         await _wait_modal(pilot, ListModal)
-        await pilot.press("down", "enter")  # encounter index
+        await pilot.press("down", "down", "enter")  # encounter index
         await _wait_modal(pilot, ListModal)
         app.save_screenshot(os.path.join(SHOTS, "34-encounter-index.png"))
         assert app._session_encounter_id == current_id

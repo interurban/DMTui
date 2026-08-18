@@ -1,9 +1,9 @@
 """Campaign persistence and roster normalization.
 
-A campaign is the long-lived container: it owns a party roster, ruleset, and
-notes.  A live encounter points at a campaign by name and snapshots the party
-at the moment the encounter starts.  Prepared encounters remain party-free
-monster setups so they can be reused with any campaign.
+A campaign is the long-lived container: it owns a party roster, lookup-reference
+preference, and notes. A live encounter points at a campaign by name and
+snapshots the party at the moment the encounter starts. Prepared encounters
+remain party-free monster setups so they can be reused with any campaign.
 """
 
 from __future__ import annotations

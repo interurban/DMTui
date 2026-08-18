@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "dmtui"
+name = "ward-dm"
 version = "0.1.0"
-description = "A table-side terminal combat tracker for D&D 5e DMs"
+description = "A private table-side control surface for D&D Dungeon Masters"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -13,10 +13,11 @@ dependencies = [
 ]
 
 [project.scripts]
-dmtui = "dmtui.cli:main"
+ward = "ward.cli:main"
+dmtui = "ward.cli:main"
 
 [tool.setuptools]
-packages = ["dmtui"]
+packages = ["ward", "dmtui"]
 py-modules = [
     "app",
     "battle",
@@ -27,8 +28,10 @@ py-modules = [
     "modals",
     "openai_client",
     "srd",
+    "ward_backup",
     "widgets",
 ]
 
 [tool.setuptools.package-data]
+ward = ["py.typed"]
 dmtui = ["py.typed"]

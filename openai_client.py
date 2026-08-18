@@ -44,30 +44,25 @@ def load_config(path: str = CONFIG_PATH) -> dict:
             local_config = json.load(local_file)
         if not isinstance(local_config, dict):
             raise RuntimeError("Local LLM config must be a JSON object")
+        base_options = config.get("options")
         config.update(local_config)
-        if isinstance(config.get("options"), dict) and isinstance(local_config.get("options"), dict):
-            config["options"] = {**config["options"], **local_config["options"]}
+        if isinstance(base_options, dict) and isinstance(local_config.get("options"), dict):
+            config["options"] = {**base_options, **local_config["options"]}
     return config
 
 
-def chat(question: str, context: str, *, config: dict | None = None) -> str:
-    """Ask OpenAI for a concise answer using the current encounter context."""
+def _client_settings(config: dict | None) -> tuple[dict, str, str, dict]:
     config = config or load_config()
     api_key = str(config.get("api_key") or os.environ.get("OPENAI_API_KEY") or "").strip()
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY is not set")
     model = str(config.get("model") or "gpt-4o-mini")
-    url = str(config.get("url") or "https://api.openai.com/v1/chat/completions")
     options = config.get("options") or {}
-    payload = {
-        "model": model,
-        "temperature": float(options.get("temperature", 0)),
-        "max_tokens": int(options.get("max_tokens", 80)),
-        "messages": [
-            {"role": "system", "content": str(config.get("system_prompt") or "Answer briefly.")},
-            {"role": "user", "content": f"Encounter context:\n{context}\n\nQuestion: {question}"},
-        ],
-    }
+    return config, api_key, model, options
+
+
+def _post_json(config: dict, api_key: str, payload: dict) -> dict:
+    url = str(config.get("url") or "https://api.openai.com/v1/chat/completions")
     request = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
@@ -92,12 +87,31 @@ def chat(question: str, context: str, *, config: dict | None = None) -> str:
         raise RuntimeError("OpenAI is not reachable") from exc
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise RuntimeError("OpenAI returned invalid JSON") from exc
+    return result
 
+
+def _choice_content(result: dict, empty_error: str) -> str:
     choices = result.get("choices") if isinstance(result, dict) else None
     message = choices[0].get("message") if choices else None
-    answer = message.get("content") if isinstance(message, dict) else None
-    if not isinstance(answer, str) or not answer.strip():
-        raise RuntimeError("OpenAI returned an empty answer")
+    content = message.get("content") if isinstance(message, dict) else None
+    if not isinstance(content, str) or not content.strip():
+        raise RuntimeError(empty_error)
+    return content
+
+
+def chat(question: str, context: str, *, config: dict | None = None) -> str:
+    """Ask OpenAI for a concise answer using the current encounter context."""
+    config, api_key, model, options = _client_settings(config)
+    payload = {
+        "model": model,
+        "temperature": float(options.get("temperature", 0)),
+        "max_tokens": int(options.get("max_tokens", 80)),
+        "messages": [
+            {"role": "system", "content": str(config.get("system_prompt") or "Answer briefly.")},
+            {"role": "user", "content": f"Encounter context:\n{context}\n\nQuestion: {question}"},
+        ],
+    }
+    answer = _choice_content(_post_json(config, api_key, payload), "OpenAI returned an empty answer")
     answer = re.sub(r"<think>.*?</think>", "", answer, flags=re.DOTALL | re.IGNORECASE)
     answer = answer.replace("\r\n", "\n").replace("\r", "\n")
     answer = "\n".join(" ".join(line.split()).strip() for line in answer.split("\n"))
@@ -117,13 +131,7 @@ def plan_encounter(
     The model chooses names and counts, but never supplies creature stats.
     Statblocks are resolved by the caller from its built-in/SRD catalog.
     """
-    config = config or load_config()
-    api_key = str(config.get("api_key") or os.environ.get("OPENAI_API_KEY") or "").strip()
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is not set")
-    model = str(config.get("model") or "gpt-4o-mini")
-    url = str(config.get("url") or "https://api.openai.com/v1/chat/completions")
-    options = config.get("options") or {}
+    config, api_key, model, options = _client_settings(config)
     catalog = ", ".join(available_names)
     payload = {
         "model": model,
@@ -140,7 +148,7 @@ def plan_encounter(
                     "properties": {
                         "title": {"type": "string"},
                         "theme": {"type": "string"},
-                        "difficulty": {"type": "string", "enum": ["Easy", "Medium", "Hard", "Deadly", "Unknown"]},
+                        "pressure": {"type": "string", "enum": ["Low", "Moderate", "High", "Extreme", "Unknown"]},
                         "monsters": {
                             "type": "array",
                             "minItems": 1,
@@ -156,7 +164,7 @@ def plan_encounter(
                             },
                         },
                     },
-                    "required": ["title", "theme", "difficulty", "monsters"],
+                    "required": ["title", "theme", "pressure", "monsters"],
                 },
             },
         },
@@ -167,9 +175,10 @@ def plan_encounter(
                     "You are a fast D&D encounter setup assistant. Return only the structured plan. "
                     "Choose only exact names from the supplied catalog. Prefer existing SRD statblocks; "
                     "never invent a monster name, statblock, or ability. Use the party context to estimate "
-                    "difficulty from character levels and actual party strength (HP, AC, attacks, and "
-                    "spellcasting) when provided. For published adventures, mark difficulty Unknown unless "
-                    "the description gives enough context. Keep the plan practical for a table-side DM."
+                    "Give only a rough, non-authoritative pressure signal from character levels and actual "
+                    "party strength (HP, AC, attacks, and spellcasting) when provided. This is not encounter "
+                    "balancing. For published adventures, use Unknown unless the request gives enough context. "
+                    "Keep the plan practical for a table-side DM."
                 ),
             },
             {
@@ -182,36 +191,9 @@ def plan_encounter(
             },
         ],
     }
-    request = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        },
-        method="POST",
+    content = _choice_content(
+        _post_json(config, api_key, payload), "OpenAI returned an empty encounter plan",
     )
-    try:
-        with urllib.request.urlopen(request, timeout=float(config.get("timeout_seconds", 60))) as response:
-            result = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        try:
-            detail = json.loads(exc.read().decode("utf-8"))
-            message = detail.get("error", {}).get("message", str(exc))
-        except Exception:
-            message = str(exc)
-        raise RuntimeError(f"OpenAI returned HTTP {exc.code}: {message}") from exc
-    except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        raise RuntimeError("OpenAI is not reachable") from exc
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        raise RuntimeError("OpenAI returned invalid JSON") from exc
-
-    choices = result.get("choices") if isinstance(result, dict) else None
-    message = choices[0].get("message") if choices else None
-    content = message.get("content") if isinstance(message, dict) else None
-    if not isinstance(content, str) or not content.strip():
-        raise RuntimeError("OpenAI returned an empty encounter plan")
     try:
         plan = json.loads(content)
     except json.JSONDecodeError as exc:

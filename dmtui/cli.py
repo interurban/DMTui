@@ -1,8 +1,3 @@
-"""Installed command entry point."""
+"""Compatibility entry point for Ward's former command name."""
 
-from app import main as run_app
-
-
-def main() -> None:
-    """Launch the DMTui terminal application."""
-    run_app()
+from ward.cli import main
