@@ -28,7 +28,8 @@ USER_AGENT = "Ward/1.0 (Tabletop Audio catalog; +https://tabletopaudio.com/)"
 _SLUG_RE = re.compile(r"^[A-Za-z0-9_]+$")
 _SAVE_RE = re.compile(r"\bsaveAs\s*\(\s*(['\"])([A-Za-z0-9_]+)\1\s*\)")
 _PATREON_PROMO_RE = re.compile(
-    r"\s*\[\s*(?:\d+\s+)?alternate\s+versions\s+available\s+for[^\]]*\]\s*$",
+    r"\s*(?:[\[(]\s*)?(?:\d+\s+)?(?:alternate|alt\.)\s+versions?\s+"
+    r"(?:available\s+)?for\b[^\]\)]*\bpatreon\b[^\]\)]*(?:[\])]\s*)?$",
     re.IGNORECASE,
 )
 _WORD_RE = re.compile(r"[A-Za-z0-9]+")

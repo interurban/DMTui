@@ -74,12 +74,26 @@ def test_displayed_type_variants_are_preserved_without_ontology() -> None:
 
 
 def test_patreon_alternate_promotion_is_removed_from_flavor_only() -> None:
+    variants = (
+        "Alternate versions available for Patreon Patrons",
+        "[Alternate version available for Patreon Patrons]",
+        "[2 Alternate versions for Patreon Patrons]",
+        "[Alt. version for Patreon Patrons]",
+    )
+    for index, promo in enumerate(variants):
+        html = PROMO_HTML.replace("[4 Alternate versions available for <a href=\"https://patreon.com/tabletopaudio\">Patreon Patrons</a>]", promo)
+        track = ta.parse_catalog_html(html)[0]
+        assert track.description == "Wind over the wall.", promo
+    ordinary = PROMO_HTML.replace(
+        "[4 Alternate versions available for <a href=\"https://patreon.com/tabletopaudio\">Patreon Patrons</a>]",
+        "The party once visited Patreon and remembered the strange posters.",
+    )
+    assert ta.parse_catalog_html(ordinary)[0].description.endswith("strange posters.")
     track = ta.parse_catalog_html(PROMO_HTML)[0]
-    assert track.description == "Wind over the wall."
     with tempfile.TemporaryDirectory() as tmp:
         path = os.path.join(tmp, "catalog.json")
         with open(path, "w", encoding="utf-8") as output:
-            json.dump({"fetched_at": 100, "tracks": [{**track.as_cache_dict(), "description": "Wind. [4 Alternate versions available for Patreon Patrons]"}]}, output)
+            json.dump({"fetched_at": 100, "tracks": [{**track.as_cache_dict(), "description": "Wind. [Alt. version for Patreon Patrons]"}]}, output)
         loaded = ta.load_catalog(path, now=101, fetcher=lambda _timeout: (_ for _ in ()).throw(AssertionError()))
         assert loaded.tracks[0].description == "Wind."
 
