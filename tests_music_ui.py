@@ -79,6 +79,13 @@ def test_music_context_groups_foes_and_excludes_party_names():
     app.combatants = []
     assert "Fantasy tabletop encounter" in app._music_encounter_context()
 
+    app._session_campaign = "Saved party"
+    app._session_encounter_name = "Nora's Moonlit Ruins"
+    app._campaign_party = lambda _name: [{"name": "Nora"}]
+    assert "Nora" not in app._music_encounter_context()
+    app._campaign_party = lambda _name: (_ for _ in ()).throw(ValueError("bad campaign data"))
+    assert "Fantasy tabletop encounter" not in app._music_encounter_context()
+
 
 class _FlowApp(BattleApp):
     def __init__(self, replies=()):
@@ -148,6 +155,102 @@ def test_music_no_results_can_refine_without_playing():
     assert any(key == "refine" for key, _label in menus[0]._options)
     assert any(isinstance(screen, TextModal) for screen in app.screens)
     assert not app.played
+
+
+def test_tabletop_audio_expands_ai_once_before_local_refines_and_no_results():
+    app = _FlowApp(["refine", "foggy bridge", "none", "back"])
+    catalog = tabletop_audio.CatalogLoad((_track(),), "network")
+    calls = []
+    ranks = []
+
+    def helper(*_args):
+        calls.append("ai")
+        return (("ominous",), ("Dungeon",))
+
+    def rank(_tracks, query, limit=5):
+        ranks.append(query)
+        return ()
+
+    with mock.patch.object(appmod, "run_in_thread", _inline), \
+         mock.patch.object(tabletop_audio, "load_catalog", return_value=catalog), \
+         mock.patch.object(openai_client, "music_search_terms", helper), \
+         mock.patch.object(tabletop_audio, "rank_tracks", rank):
+        asyncio.run(app._tabletop_audio_flow())
+    assert calls == ["ai"]
+    assert len(ranks) == 3 and "foggy bridge" in ranks[-1]
+    assert isinstance(app.screens[0], GeneratingModal)
+
+
+def test_tabletop_audio_escape_while_loading_never_opens_or_reopens_menus():
+    catalog = tabletop_audio.CatalogLoad((_track(),), "fresh-cache")
+
+    async def exercise(phase):
+        app = _FlowApp(["suggest-tabletop"])
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def delayed(fn, *args):
+            if (phase == "catalog" and fn is tabletop_audio.load_catalog) or (
+                phase == "ai" and fn is openai_client.music_search_terms
+            ):
+                started.set()
+                await release.wait()
+            if fn is tabletop_audio.load_catalog:
+                return catalog
+            if fn is openai_client.music_search_terms:
+                return (), ()
+            return fn(*args)
+
+        with mock.patch.object(appmod, "run_in_thread", delayed):
+            task = asyncio.create_task(app._music_flow())
+            await started.wait()
+            loading = next(screen for screen in app.screens if isinstance(screen, GeneratingModal))
+            with mock.patch.object(loading, "dismiss", return_value=None):
+                loading.action_cancel()
+            release.set()
+            await task
+        menus = [screen for screen in app.screens if isinstance(screen, ListModal)]
+        assert len(menus) == 1 and menus[0]._title.startswith("MUSIC ·")
+        assert not any(menu._title.startswith("TABLETOP AUDIO ·") for menu in menus)
+
+    asyncio.run(exercise("catalog"))
+    asyncio.run(exercise("ai"))
+
+
+def test_music_worker_is_named_and_exclusive():
+    app = _FlowApp()
+    calls = []
+
+    def fake_run_worker(work, **kwargs):
+        calls.append((work, kwargs))
+
+    app.run_worker = fake_run_worker
+    app.action_music()
+    app.action_music()
+    for work, _kwargs in calls:
+        work.close()
+    assert len(calls) == 2
+    assert all(kwargs["name"] == "music-controls" for _work, kwargs in calls)
+    assert all(kwargs["group"] == "music-controls" and kwargs["exclusive"] for _work, kwargs in calls)
+
+
+def test_invalid_config_still_offers_online_tabletop_audio_and_playback_failure_reopens_controls():
+    app = _FlowApp(["back"])
+    with mock.patch.object(appmod.music, "load_config", side_effect=ValueError("bad config")):
+        asyncio.run(app._music_flow())
+    menu = next(screen for screen in app.screens if isinstance(screen, ListModal))
+    assert any(key == "suggest-tabletop" for key, _label in menu._options)
+    assert any("bad config" in message for message, _kind in app.logs)
+
+    app = _FlowApp(["suggest-tabletop", "tta:crypt", "back"])
+    catalog = tabletop_audio.CatalogLoad((_track(),), "fresh-cache")
+    app._play_music_source = lambda *_args, **_kwargs: False
+    with mock.patch.object(appmod, "run_in_thread", _inline), \
+         mock.patch.object(tabletop_audio, "load_catalog", return_value=catalog), \
+         mock.patch.object(openai_client, "music_search_terms", return_value=((), ())):
+        asyncio.run(app._music_flow())
+    menus = [screen for screen in app.screens if isinstance(screen, ListModal)]
+    assert [menu._title.startswith("MUSIC ·") for menu in menus] == [True, False, True]
 
 
 def test_tabletop_audio_back_reopens_music_controls_for_results_and_no_results():

@@ -1171,7 +1171,13 @@ class BattleApp(App[None]):
         self.run_worker(self._campaign_flow())
 
     def action_music(self) -> None:
-        self.run_worker(self._music_flow())
+        self.run_worker(
+            self._music_flow(),
+            name="music-controls",
+            group="music-controls",
+            exclusive=True,
+            exit_on_error=False,
+        )
 
     def _music_status(self) -> str:
         source = self._music.source
@@ -1182,9 +1188,18 @@ class BattleApp(App[None]):
 
     def _music_encounter_context(self) -> str:
         """Describe only public encounter state relevant to a soundtrack search."""
-        pc_names = [c.name.strip() for c in self.combatants if c.kind == "PC" and c.name.strip()]
+        private_names = {c.name.strip() for c in self.combatants if c.kind == "PC" and c.name.strip()}
+        try:
+            saved_party = self._campaign_party(self._session_campaign)
+        except Exception:
+            saved_party = []
+        private_names.update(
+            member["name"].strip()
+            for member in saved_party
+            if isinstance(member, dict) and isinstance(member.get("name"), str) and member["name"].strip()
+        )
         encounter_name = self._session_encounter_name.strip()
-        for name in pc_names:
+        for name in private_names:
             encounter_name = re.sub(re.escape(name), "", encounter_name, flags=re.IGNORECASE)
         encounter_name = re.sub(r"\s+", " ", encounter_name).strip(" -·,:;")
         groups: dict[str, int] = {}
@@ -1235,7 +1250,25 @@ class BattleApp(App[None]):
         self.push_screen(loading)
         try:
             catalog = await run_in_thread(tabletop_audio.load_catalog, TABLETOP_AUDIO_CACHE_PATH)
+            if loading.cancelled:
+                return False
+            context = self._music_encounter_context()
+            categories = tuple(sorted({category for track in catalog.tracks for category in track.categories}, key=str.casefold))
+            ai_terms: tuple[str, ...] = ()
+            ai_categories: tuple[str, ...] = ()
+            try:
+                ai_terms, ai_categories = await run_in_thread(
+                    openai_client.music_search_terms, context, categories
+                )
+            except Exception:
+                if loading.cancelled:
+                    return False
+                self._log("Music AI helper unavailable; using local encounter search.", kind="info")
+            if loading.cancelled:
+                return False
         except Exception as exc:
+            if loading.cancelled:
+                return False
             self._log(f"Tabletop Audio suggestions unavailable: {escape(str(exc))}", kind="warn")
             return True
         finally:
@@ -1247,18 +1280,8 @@ class BattleApp(App[None]):
         if catalog.status == "stale-cache":
             self._log("Tabletop Audio catalog refresh failed; using stale metadata.", kind="warn")
 
-        context = self._music_encounter_context()
-        categories = tuple(sorted({category for track in catalog.tracks for category in track.categories}, key=str.casefold))
         detail = ""
         while True:
-            ai_terms: tuple[str, ...] = ()
-            ai_categories: tuple[str, ...] = ()
-            try:
-                ai_terms, ai_categories = await run_in_thread(
-                    openai_client.music_search_terms, context, categories
-                )
-            except Exception:
-                self._log("Music AI helper unavailable; using local encounter search.", kind="info")
             query = " ".join(part for part in (context, detail, *ai_terms, *ai_categories) if part).strip()
             tracks = tabletop_audio.rank_tracks(catalog.tracks, query, limit=5)
             options: list[tuple[str, str]] = []
@@ -1283,20 +1306,24 @@ class BattleApp(App[None]):
                 ("refine", folio_choice("REFINE", "Search mood or keywords", "Required for a narrower local match")),
                 ("back", "[#717b89]Back to music[/]"),
             ])
-            picked = await self.push_screen(
-                ListModal(
-                    "TABLETOP AUDIO · ENCOUNTER SUGGESTIONS · CC BY-NC-ND 4.0",
-                    options,
-                    wide=True,
-                    compact=True,
-                ),
-                wait_for_dismiss=True,
+            results = ListModal(
+                "TABLETOP AUDIO · ENCOUNTER SUGGESTIONS · CC BY-NC-ND 4.0",
+                options,
+                wide=True,
+                compact=True,
             )
+            try:
+                picked = await self.push_screen(results, wait_for_dismiss=True)
+            finally:
+                if results.is_mounted:
+                    results.dismiss()
             if picked == "refine":
-                detail = await self.push_screen(
-                    TextModal("REFINE TABLETOP AUDIO", "required: ominous rain, chase, candlelit ruins", confirm="Search"),
-                    wait_for_dismiss=True,
-                ) or ""
+                refine = TextModal("REFINE TABLETOP AUDIO", "required: ominous rain, chase, candlelit ruins", confirm="Search")
+                try:
+                    detail = await self.push_screen(refine, wait_for_dismiss=True) or ""
+                finally:
+                    if refine.is_mounted:
+                        refine.dismiss()
                 if not detail:
                     continue
                 continue
@@ -1310,10 +1337,11 @@ class BattleApp(App[None]):
                 if track is None:
                     self._log("That Tabletop Audio selection is no longer available.", kind="warn")
                     return True
-                self._play_music_source(
+                if not self._play_music_source(
                     music.MusicSource(track.title, track.playback_url, note="Tabletop Audio", loop=True),
                     attribution="Tabletop Audio · CC BY-NC-ND 4.0",
-                )
+                ):
+                    return True
                 return False
 
     async def _music_flow(self) -> None:
@@ -1328,8 +1356,8 @@ class BattleApp(App[None]):
             except ValueError as exc:
                 if not self._music.active:
                     self._log(escape(str(exc)), kind="warn")
-                    return
-                self._log(f"{escape(str(exc))}; current playback controls remain available.", kind="warn")
+                else:
+                    self._log(f"{escape(str(exc))}; current playback controls remain available.", kind="warn")
             else:
                 self._music.configure(config.backend, config.volume)
 
@@ -1360,15 +1388,17 @@ class BattleApp(App[None]):
                     "SUGGEST", "Tabletop Audio", "Free public 10-minute tracks · encounter-aware",
                 )))
             options.append(("back", "[#717b89]Back to Ward[/]"))
-            picked = await self.push_screen(
-                ListModal(
-                    f"MUSIC · {escape(self._music_status().upper())}",
-                    options,
-                    wide=True,
-                    compact=True,
-                ),
-                wait_for_dismiss=True,
+            controls = ListModal(
+                f"MUSIC · {escape(self._music_status().upper())}",
+                options,
+                wide=True,
+                compact=True,
             )
+            try:
+                picked = await self.push_screen(controls, wait_for_dismiss=True)
+            finally:
+                if controls.is_mounted:
+                    controls.dismiss()
             if picked == "pause":
                 try:
                     paused = self._music.toggle_pause()
@@ -1394,7 +1424,8 @@ class BattleApp(App[None]):
                 except (IndexError, ValueError) as exc:
                     self._log(f"Music could not start: {escape(str(exc))}", kind="warn")
                     return
-                self._play_music_source(source)
+                if not self._play_music_source(source):
+                    continue
             return
 
     async def _campaign_flow(self) -> None:
