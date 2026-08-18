@@ -152,8 +152,9 @@ encounter, or `s` to cycle through all three modes. Bare `Tab` and function keys
 are left to normal terminal/desktop behavior. The references are intentionally
 read-only; the physical table remains authoritative.
 
-The small token map is a spatial note that mirrors the physical table. It does
-not calculate range, movement, terrain, line of sight, areas, or legal actions.
+The token map tracks approximate creature positions during an encounter. It
+does not calculate range, movement, terrain, line of sight, areas, or legal
+actions.
 
 ### D&D Beyond imports
 
@@ -181,11 +182,9 @@ remembers the notes; `Esc` cancels.
 
 ## Keys
 
-Ward uses one keyboard grammar: bare keys act on the live encounter; `Ctrl`
-opens Ward-wide tools or changes session-level state. Each panel footer shows
-only its essential local commands. Bare shortcut letters are highlighted inside
-their action labels; `Ctrl` and symbol shortcuts stay explicit. Press `?` for
-this complete reference.
+Ward is keyboard-first. Each panel footer shows only the commands most useful
+there. Shortcut letters are highlighted inside their action labels; `Ctrl` and
+symbol shortcuts stay explicit. Press `?` for the complete reference.
 
 | Key | Action |
 | --- | --- |
@@ -218,7 +217,7 @@ this complete reference.
 | `Ctrl+E` | save/start prepared encounters |
 | `/` | ask the OpenAI DM assistant |
 | `/roll 2d6+4` | roll dice locally without using OpenAI |
-| `q` / `?` | quit / help |
+| `Ctrl+Q` / `?` | quit / help |
 
 ## Attacks & spells
 

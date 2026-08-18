@@ -121,19 +121,30 @@ LOG_COLORS = {
 }
 
 
-def hint(key: str, word: str) -> str:
+def hint(key: str, word: str) -> Text:
     """Highlight a mnemonic inside its action, or show non-mnemonic keys first."""
+    text = Text()
     if len(key) == 1 and key.isalpha():
         index = word.lower().find(key.lower())
         if index >= 0:
-            before = f"[dim]{word[:index]}[/]" if index else ""
-            after = f"[dim]{word[index + 1:]}[/]" if index + 1 < len(word) else ""
-            return f"{before}[bold #f0c96a]{word[index]}[/]{after}"
+            after = word[index + 1:]
+            leading_spaces = len(after) - len(after.lstrip(" "))
+            text.append(word[:index], style="dim")
+            text.append(word[index] + after[:leading_spaces], style="bold #f0c96a")
+            text.append(after[leading_spaces:], style="dim")
+            return text
     display_key = key
     if key.startswith("ctrl+"):
         suffix = key.removeprefix("ctrl+")
         display_key = f"Ctrl+{suffix.upper() if len(suffix) == 1 else suffix.title()}"
-    return f"[bold #f0c96a]{display_key}[/] [dim]{word}[/]"
+    text.append(f"{display_key} ", style="bold #f0c96a")
+    text.append(word, style="dim")
+    return text
+
+
+def hint_line(*items: tuple[str, str]) -> Text:
+    """Join footer hints without converting their styled text back to markup."""
+    return Text("  ·  ", style="dim").join(hint(key, word) for key, word in items)
 
 
 def _music_nav_display(player: music.MusicPlayer) -> tuple[str, str]:
@@ -294,7 +305,15 @@ class BattleApp(App[None]):
     .wide-modal { width: 82; max-width: 94%; }
     .wide-modal #modal-list { height: 20; }
     .compact-modal #modal-list { height: auto; min-height: 5; max-height: 14; }
-    .help-modal { width: 104; max-width: 96%; }
+    .help-modal { width: 112; max-width: 96%; }
+    .help-intro { height: auto; margin-bottom: 1; color: #8a93a3; }
+    .help-columns { width: 100%; height: auto; }
+    .help-column { width: 1fr; height: auto; padding-right: 2; }
+    #help-column-right {
+        border-left: tall #2a3446;
+        padding-left: 2;
+        padding-right: 0;
+    }
     #lib-list { height: 1fr; border: round #2a3446; margin-top: 1; }
     #modal-list {
         height: 15;
@@ -390,7 +409,7 @@ class BattleApp(App[None]):
         Binding("ctrl+z", "undo", "Undo"),
         Binding("ctrl+y", "redo", "Redo"),
         Binding("s", "toggle_view", "Switch view"),
-        Binding("q", "quit", "Quit"),
+        Binding("ctrl+q", "quit", "Quit"),
         Binding("slash", "chat", "Chat"),
     ]
 
@@ -516,25 +535,22 @@ class BattleApp(App[None]):
         if not self._chat_mode:
             if self.view_mode != "combat":
                 hints.update(
-                    "  ·  ".join(
-                        [
-                            hint("s", "switch view"),
-                            hint("ctrl+1", "combat"),
-                            hint("/", "lookup"),
-                            hint("?", "all keys"),
-                        ]
+                    hint_line(
+                        ("s", "switch view"),
+                        ("ctrl+1", "combat"),
+                        ("/", "lookup"),
+                        ("?", "all keys"),
                     )
                 )
             else:
                 hints.update(
-                    "  ·  ".join(
-                    [
-                        hint("s", "views"),
-                        hint("ctrl+o", "campaign"),
-                        hint("ctrl+n", "new encounter"),
-                        hint("/", "lookup"),
-                        hint("?", "all keys"),
-                    ]
+                    hint_line(
+                        ("s", "views"),
+                        ("ctrl+o", "campaign"),
+                        ("ctrl+n", "new encounter"),
+                        ("ctrl+k", "music"),
+                        ("/", "lookup"),
+                        ("?", "all keys"),
                     )
                 )
         elif self._chat_busy:
@@ -939,7 +955,7 @@ class BattleApp(App[None]):
             return (
                 options,
                 "Open your DM folio",
-                "Ward remembers the bookkeeping. Your physical table remains authoritative.",
+                "Track initiative, HP, conditions, and campaign notes in one place.",
             )
 
         active = data.get("active")
@@ -2251,14 +2267,14 @@ class BattleApp(App[None]):
             grid.update(panel_text("combat"))
             self.query_one("#map-title", Static).update("COMBAT QUICK RULES")
             self.query_one("#map-status", Static).update(
-                "  ·  ".join([hint("s", "switch view"), hint("ctrl+1", "combat")])
+                hint_line(("s", "switch view"), ("ctrl+1", "combat"))
             )
             return
         if self.view_mode == "party":
             grid.update(self._party_overview_markup())
             self.query_one("#map-title", Static).update("PARTY REFERENCE")
             self.query_one("#map-status", Static).update(
-                "  ·  ".join([hint("s", "switch view"), hint("ctrl+1", "combat")])
+                hint_line(("s", "switch view"), ("ctrl+1", "combat"))
             )
             return
         avail_w = max(1, grid.size.width - LEFT_W)
@@ -2465,19 +2481,25 @@ class BattleApp(App[None]):
         turn_s = f"{turn.name} @ {coord_name(turn.x, turn.y)}" if turn else "—"
         return f"BATTLE MAP  ·  R{self.round}  ·  TURN: [bold #c9a227]{turn_s}[/]"
 
-    def _map_status_text(self) -> str:
+    def _map_status_text(self) -> str | Text:
         sel = self._sel
         if self._moving and sel:
             return f"[bold #3fae6a]MOVING {sel.name}[/] — [bold #e6ebf2]arrows[/] [dim]place[/], [bold #e6ebf2]g[/]/[bold #e6ebf2]esc[/] [dim]drop[/]"
-        sel_s = f"[bold #ffffff]{sel.name}[/] @ {coord_name(sel.x, sel.y)}" if sel else "none"
-        hint_text = "  ·  ".join(
-            [hint("↑↓", "select"), hint("←→", "±HP"), hint("g", "grab / move")]
+        status = Text()
+        if sel:
+            status.append(sel.name, style="bold #ffffff")
+            status.append(f" @ {coord_name(sel.x, sel.y)}")
+        else:
+            status.append("none")
+        status.append("   ·   ")
+        status.append_text(
+            hint_line(("↑↓", "select"), ("←→", "±HP"), ("g", "grab / move"))
         )
-        return f"{sel_s}   ·   {hint_text}"
+        return status
 
-    def _init_status_text(self) -> str:
+    def _init_status_text(self) -> str | Text:
         if self.view_mode != "combat":
-            return "  ·  ".join([hint("s", "switch view"), hint("ctrl+1", "combat")])
+            return hint_line(("s", "switch view"), ("ctrl+1", "combat"))
         if self._init_entry is not None and self._sel is not None:
             return (
                 f"[bold #e0c04c]INIT[/] [bold #e6ebf2]{self._init_entry or '--'}[/] → "
@@ -2493,25 +2515,20 @@ class BattleApp(App[None]):
                 f"[bold #ffffff]{self._sel.name}[/]   ·   "
                 "[bold #e6ebf2]Enter[/] apply · [bold #e6ebf2]Esc[/] cancel"
             )
-        return "  ·  ".join(
-            [hint("n", "next turn"), hint("r", "monster init"), hint("ctrl+t", "party init")]
+        return hint_line(
+            ("n", "next turn"), ("r", "monster init"), ("t", "edit init")
         )
 
-    def _log_status_text(self) -> str:
+    def _log_status_text(self) -> Text:
         if self.view_mode != "combat":
-            return "  ·  ".join([hint("/", "lookup"), hint("?", "all keys")])
-        return "  ·  ".join([hint("ctrl+z", "undo"), hint("ctrl+y", "redo")])
+            return hint_line(("/", "lookup"), ("?", "all keys"))
+        return hint_line(("ctrl+z", "undo"), ("ctrl+y", "redo"))
 
-    def _detail_status_text(self) -> str:
+    def _detail_status_text(self) -> Text:
         if self.view_mode != "combat":
-            return "  ·  ".join([hint("/", "lookup"), hint("?", "all keys")])
-        return "  ·  ".join(
-            [
-                hint("a", "attack"),
-                hint("d", "damage"),
-                hint("h", "heal"),
-                hint("c", "condition"),
-            ]
+            return hint_line(("/", "lookup"), ("?", "all keys"))
+        return hint_line(
+            ("a", "attack"), ("d", "damage"), ("h", "heal"), ("c", "condition")
         )
 
     def _map_text(self, cell_w: int) -> Text:

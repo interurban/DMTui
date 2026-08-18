@@ -738,11 +738,13 @@ def test_modified_bindings_use_one_ctrl_only_grammar():
         "ctrl+k": "music",
         "ctrl+n": "new_encounter",
         "ctrl+o": "campaign",
+        "ctrl+q": "quit",
         "ctrl+r": "reset",
         "ctrl+t": "initiative_pass",
         "ctrl+y": "redo",
         "ctrl+z": "undo",
     }
+    assert "q" not in bindings
     assert "ctrl+i" not in bindings and "ctrl+m" not in bindings  # terminal aliases for Tab / Enter
     assert not any(
         key.startswith("shift+") or (len(key) == 1 and key.isupper())
@@ -755,13 +757,14 @@ def test_panel_key_hints_keep_only_the_local_working_set():
     from app import BattleApp, hint
 
     app = BattleApp()
-    assert all(key in app._map_status_text() for key in ("↑↓", "←→", "g"))
-    assert all(key in app._init_status_text() for key in ("n", "r", "Ctrl+T"))
-    assert all(key in app._log_status_text() for key in ("Ctrl+Z", "Ctrl+Y"))
-    assert all(key in app._detail_status_text() for key in ("a", "d", "h", "c"))
-    assert "Ctrl+O" not in app._detail_status_text()
-    assert hint("n", "next turn") == "[bold #f0c96a]n[/][dim]ext turn[/]"
-    assert hint("ctrl+n", "new encounter").startswith("[bold #f0c96a]Ctrl+N[/]")
+    assert all(key in app._map_status_text().plain for key in ("↑↓", "←→", "g"))
+    assert all(key in app._init_status_text().plain for key in ("n", "r", "t"))
+    assert "Ctrl+T" not in app._init_status_text().plain
+    assert all(key in app._log_status_text().plain for key in ("Ctrl+Z", "Ctrl+Y"))
+    assert all(key in app._detail_status_text().plain for key in ("a", "d", "h", "c"))
+    assert "Ctrl+O" not in app._detail_status_text().plain
+    assert hint("n", "next turn").plain == "next turn"
+    assert hint("ctrl+n", "new encounter").plain == "Ctrl+N new encounter"
 
 
 def test_music_config_keeps_sources_swappable_and_validated():
@@ -975,7 +978,7 @@ def test_startup_menu_is_onboarding_when_campaign_book_is_empty():
     options, prompt, subtitle = BattleApp()._startup_menu(campaign_store.empty_book(), None, 0)
     assert [key for key, _label in options] == ["setup", "sample", "blank", "quit"]
     assert prompt == "Open your DM folio"
-    assert "physical table remains authoritative" in subtitle.lower()
+    assert subtitle == "Track initiative, HP, conditions, and campaign notes in one place."
 
     options, _prompt, _subtitle = BattleApp()._startup_menu(campaign_store.empty_book(), None, 2)
     assert [key for key, _label in options] == ["setup", "sample", "blank", "data", "quit"]

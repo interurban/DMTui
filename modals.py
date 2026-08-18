@@ -8,6 +8,7 @@ from textual.containers import Container, Horizontal
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, ListItem, ListView, Static, TextArea
 from rich.markup import escape
+from rich.text import Text
 
 
 def folio_choice(verb: str, title: str, detail: str = "") -> str:
@@ -37,6 +38,22 @@ def _menu_entry(key: str, label: str) -> ListItem:
         Label(label, classes="modal-item"),
         classes=" ".join(classes),
     )
+
+
+def _help_column(sections: list[tuple[str, list[tuple[str, str]]]]) -> Text:
+    """Render a key-reference column with terminal-cell alignment."""
+    text = Text()
+    for section_index, (title, rows) in enumerate(sections):
+        if section_index:
+            text.append("\n\n")
+        text.append(title, style="bold #a8d0ff")
+        text.append("\n")
+        for row_index, (key, action) in enumerate(rows):
+            text.append(key.ljust(15), style="bold #d2aa5a")
+            text.append(action)
+            if row_index + 1 < len(rows):
+                text.append("\n")
+    return text
 
 
 class NumberModal(ModalScreen[int]):
@@ -569,30 +586,61 @@ class HelpModal(ModalScreen[None]):
     def compose(self) -> ComposeResult:
         with Container(classes="modal-box help-modal"):
             yield Static(
-                "[bold #a8d0ff]WARD[/]  [#8a93a3]A PRIVATE, TABLE-SIDE TOOL FOR THE DM[/]\n"
-                "[#8a93a3]Ward remembers volatile state and retrieves references.\n"
-                "Your physical table and your rulings remain authoritative.[/]\n"
-                "[#d2aa5a]Bare keys act on the encounter · Ctrl opens Ward-wide tools[/]\n\n"
-                "[bold #a8d0ff]RUN THE ENCOUNTER[/]\n"
-                "  [bold]↑↓ / k j[/]: select   ·   [bold]←→[/]: adjust HP\n"
-                "  [bold]n[/]: next turn   ·   [bold]g[/]: move token   ·   [bold]+[/]: duplicate monster\n"
-                "  [bold]Enter / a[/]: attack   ·   [bold]d / h[/]: damage / heal; type amount, Enter applies\n"
-                "  [bold]c[/]: condition   ·   [bold]r[/]: monster init   ·   [bold]t[/]: selected init   ·   [bold]Ctrl+T[/]: party init\n\n"
-                "[bold #a8d0ff]ADD AND ADJUST[/]\n"
-                "  [bold]m[/]: quick monster   ·   [bold]Ctrl+B[/]: monster library   ·   [bold]v[/]: spellbook\n"
-                "  [bold]i[/]: import PC   ·   [bold]p[/]: add PC   ·   [bold]e[/]: edit   ·   [bold]x[/]: remove\n"
-                "  [bold]Ctrl+R[/]: reset encounter   ·   [bold]Ctrl+Z / Ctrl+Y[/]: undo / redo\n\n"
-                "[bold #a8d0ff]FOLIO AND PREPARATION[/]\n"
-                "  [bold]Ctrl+O[/]: campaign folio   ·   [bold]Ctrl+N[/]: new encounter   ·   [bold]Ctrl+E[/]: prepared encounters\n"
-                "  [bold]Ctrl+G[/]: encounter assistant   ·   [bold]Ctrl+K[/]: soundtrack controls\n\n"
-                "[bold #a8d0ff]REFERENCE AND NAVIGATION[/]\n"
-                "  [bold]s[/]: cycle Combat / DM Screen / Party   ·   [bold]Ctrl+1 / Ctrl+2 / Ctrl+3[/]: choose directly\n"
-                "  [bold]f[/]: find creature or map note   ·   [bold]/[/]: lookup   ·   [bold]/roll 2d6+4[/]: local roll\n"
-                "  [bold]?[/]: all keys   ·   [bold]q[/]: quit   ·   Ward remembers live encounters automatically.\n\n"
-                "[dim]The map is a quick note that mirrors the physical table—not a virtual tabletop.\n"
-                "Click to select; [bold]g[/] grabs, arrows place, [bold]g / Esc[/] drops. Blue = PC · red = monster.[/]",
-                classes="modal-help",
+                "[bold #a8d0ff]WARD[/]  [#566172]╱[/]  [bold #c9d3e0]KEY FOLIO[/]",
+                classes="modal-title",
             )
+            yield Static(
+                "Use these shortcuts to run encounters and open campaign tools.",
+                classes="help-intro",
+            )
+            with Horizontal(classes="help-columns"):
+                yield Static(
+                    _help_column([
+                        ("RUN THE ENCOUNTER", [
+                            ("↑↓ / k j", "Select creature"),
+                            ("←→", "Adjust HP by 1"),
+                            ("g", "Grab or drop; arrows place"),
+                            ("n", "Next turn"),
+                            ("Enter / a", "Attack"),
+                            ("d / h", "Damage / heal; type amount"),
+                            ("c", "Set a condition"),
+                            ("+", "Duplicate selected monster"),
+                        ]),
+                        ("INITIATIVE", [
+                            ("r", "Roll monster initiative"),
+                            ("t", "Edit selected initiative"),
+                            ("Ctrl+T", "Enter party initiative"),
+                        ]),
+                    ]),
+                    classes="help-column",
+                )
+                yield Static(
+                    _help_column([
+                        ("ADD AND ADJUST", [
+                            ("m", "Quick monster"),
+                            ("Ctrl+B", "Monster library"),
+                            ("v", "Spellbook"),
+                            ("i / p", "Import / add PC"),
+                            ("e / x", "Edit / remove selected"),
+                            ("Ctrl+R", "Reset encounter"),
+                        ]),
+                        ("FOLIO AND TOOLS", [
+                            ("Ctrl+O", "Campaign folio"),
+                            ("Ctrl+N", "New encounter"),
+                            ("Ctrl+E / G", "Prepared / assisted encounter"),
+                            ("Ctrl+K", "Music controls"),
+                        ]),
+                        ("NAVIGATE AND RECOVER", [
+                            ("s / Ctrl+1–3", "Cycle / choose view"),
+                            ("f / /", "Find / quick lookup"),
+                            ("/roll 2d6+4", "Roll locally"),
+                            ("Ctrl+Z / Y", "Undo / redo"),
+                            ("? / Ctrl+Q", "All keys / quit"),
+                        ]),
+                    ]),
+                    classes="help-column",
+                    id="help-column-right",
+                )
             yield Static("[dim][bold]Enter[/] or [bold]Esc[/] close[/]", classes="modal-hint")
 
     def action_cancel(self) -> None:

@@ -13,6 +13,14 @@ Sprint log for Ward — a private, table-side tool for D&D Dungeon Masters
 - Folio menus now use aligned action labels, content-sized rows, explicit
   keyboard guidance, and a quiet bookmark-style selection marker instead of a
   generic full-width blue highlight.
+- Panel footers now read as action labels with their shortcut letter highlighted
+  in gold. The combat footer surfaces music controls, and the initiative footer
+  prioritizes next turn, monster initiative, and editing the selected initiative.
+- The `?` key folio is now a two-column quick reference with aligned shortcuts,
+  grouped actions, and plain-language guidance. Quitting requires `Ctrl+Q` so a
+  stray `q` cannot end a session.
+- First-run and token-map copy now state what Ward tracks directly instead of
+  asking the user to interpret product-positioning language.
 - Campaign ruleset selection moved out of first-run setup and became an explicit
   lookup-reference preference. Ward does not claim to enforce 2014 or 2024
   rules.
