@@ -7,9 +7,11 @@ the URL derived by :class:`TabletopAudioTrack`.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from html.parser import HTMLParser
 import json
+from collections.abc import Sequence
+import math
 import re
 import time
 from typing import Any, Callable, Iterable
@@ -21,10 +23,10 @@ import persistence
 CATALOG_URL = "https://tabletopaudio.com/"
 SOUNDS_URL = "https://sounds.tabletopaudio.com"
 CACHE_MAX_AGE_SECONDS = 24 * 60 * 60
+MAX_FETCH_TIMEOUT_SECONDS = 30.0
 USER_AGENT = "Ward/1.0 (Tabletop Audio catalog; +https://tabletopaudio.com/)"
 _SLUG_RE = re.compile(r"^[A-Za-z0-9_]+$")
 _SAVE_RE = re.compile(r"\bsaveAs\s*\(\s*(['\"])([A-Za-z0-9_]+)\1\s*\)")
-_TYPE_RE = re.compile(r"\b(ambience(?:\s*\+\s*music)?|music)\b", re.I)
 _WORD_RE = re.compile(r"[A-Za-z0-9]+")
 
 
@@ -39,12 +41,17 @@ class TabletopAudioTrack:
     categories: tuple[str, ...]
 
     def __post_init__(self) -> None:
-        if not _SLUG_RE.fullmatch(self.slug):
+        if not isinstance(self.slug, str) or not _SLUG_RE.fullmatch(self.slug):
             raise ValueError("Tabletop Audio download id must be alphanumeric or underscore")
-        if not self.title.strip():
+        if not isinstance(self.title, str) or not self.title.strip():
             raise ValueError("Tabletop Audio track title cannot be empty")
-        if not isinstance(self.categories, tuple):
-            object.__setattr__(self, "categories", tuple(self.categories))
+        if not isinstance(self.audio_type, str) or not isinstance(self.description, str):
+            raise ValueError("Tabletop Audio type and description must be strings")
+        if isinstance(self.categories, (str, bytes)) or not isinstance(self.categories, Sequence):
+            raise ValueError("Tabletop Audio categories must be a sequence of strings")
+        if any(not isinstance(category, str) for category in self.categories):
+            raise ValueError("Tabletop Audio categories must be a sequence of strings")
+        object.__setattr__(self, "categories", tuple(self.categories))
 
     @property
     def download_id(self) -> str:
@@ -161,14 +168,49 @@ def _card_track(card: _Node) -> TabletopAudioTrack | None:
     if not title:
         return None
 
-    type_nodes = _find_class(card, "audio_type", "audio-type", "track_type", "track-type", "type")
-    audio_type = next((_text(node) for node in type_nodes if _text(node)), "")
-    if not audio_type:
-        for node in _descendants(card):
+    # The site's type line is part of the title block.  Read that displayed
+    # element (rather than recognizing a hardcoded set of type phrases), so
+    # new official labels remain intact.
+    audio_type = ""
+    for title_node in title_nodes:
+        type_nodes = _find_class(title_node, "audio_type", "audio-type", "track_type", "track-type", "type")
+        candidates = type_nodes + [
+            node for node in _descendants(title_node) if node.tag in {"i", "em", "small"}
+        ]
+        for node in candidates:
             candidate = _text(node)
-            match = _TYPE_RE.search(candidate)
-            if match:
-                audio_type = match.group(1)
+            if candidate and candidate.casefold() != title.casefold():
+                audio_type = candidate
+                break
+        if audio_type:
+            break
+        # A type line may be an unclassed element immediately after the h3.
+        heading_seen = False
+        for child in title_node.children:
+            if not isinstance(child, _Node):
+                if heading_seen and child.strip():
+                    audio_type = child
+                    break
+                continue
+            if child.tag in {"h1", "h2", "h3", "h4"}:
+                heading_seen = True
+                continue
+            if heading_seen:
+                candidate = _text(child)
+                if candidate:
+                    audio_type = candidate
+                    break
+        if audio_type:
+            break
+    if not audio_type:
+        # Some revisions place the type line beside (rather than inside) the
+        # title block.  It remains structurally marked; preserve its complete
+        # displayed text without interpreting the vocabulary.
+        type_nodes = _find_class(card, "audio_type", "audio-type", "track_type", "track-type", "type")
+        for node in type_nodes:
+            candidate = _text(node)
+            if candidate and candidate.casefold() != title.casefold():
+                audio_type = candidate
                 break
     audio_type = re.sub(r"\s+", " ", audio_type).strip()
 
@@ -195,13 +237,22 @@ def _card_track(card: _Node) -> TabletopAudioTrack | None:
         for node in _descendants(card):
             if node.tag not in {"p", "span", "div"}:
                 continue
+            classes = _classes(node)
+            if classes.intersection({"track_title", "track-title", "track_type", "track-type", "audio_type", "audio-type"}):
+                continue
             text = _text(node)
             if text and text.casefold() not in {title.casefold(), audio_type.casefold()}:
                 if "patreon" not in text.casefold() and not any(label in text.casefold() for label in ("save", "add", "play")):
                     pieces.append(text)
         description = pieces[0] if pieces else ""
 
-    categories = tuple(sorted(category for category in _classes(card) if category not in {"col-md-3", "mix"}))
+    categories = tuple(
+        dict.fromkeys(
+            category
+            for category in card.attrs.get("class", "").split()
+            if category not in {"col-md-3", "mix"}
+        )
+    )
     return TabletopAudioTrack(slug, title, audio_type, description, categories)
 
 
@@ -241,6 +292,8 @@ def _cache_tracks(raw: Any) -> tuple[float, tuple[TabletopAudioTrack, ...]]:
     stamp = raw.get("fetched_at")
     if isinstance(stamp, (int, float)) and not isinstance(stamp, bool):
         timestamp = float(stamp)
+        if not math.isfinite(timestamp):
+            raise ValueError("cache timestamp invalid")
     elif isinstance(stamp, str):
         timestamp = datetime.fromisoformat(stamp.replace("Z", "+00:00")).timestamp()
     else:
@@ -252,14 +305,14 @@ def _cache_tracks(raw: Any) -> tuple[float, tuple[TabletopAudioTrack, ...]]:
     seen: set[str] = set()
     for item in entries:
         if not isinstance(item, dict):
-            continue
+            raise ValueError("cache track must be an object")
         try:
             track = TabletopAudioTrack(
                 slug=item["slug"], title=item["title"], audio_type=item.get("audio_type", ""),
-                description=item.get("description", ""), categories=tuple(item.get("categories", ())),
+                description=item.get("description", ""), categories=item.get("categories", ()),
             )
-        except (KeyError, TypeError, ValueError):
-            continue
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("cache contains malformed track metadata") from exc
         if track.slug not in seen:
             seen.add(track.slug)
             tracks.append(track)
@@ -275,6 +328,7 @@ def _read_cache(path: str) -> tuple[float, tuple[TabletopAudioTrack, ...]] | Non
 
 
 def _fetch_catalog(timeout: float) -> str:
+    timeout = max(0.1, min(float(timeout), MAX_FETCH_TIMEOUT_SECONDS))
     request = Request(CATALOG_URL, headers={"User-Agent": USER_AGENT, "Accept": "text/html"})
     with urlopen(request, timeout=timeout) as response:
         body = response.read()
@@ -318,7 +372,13 @@ def load_catalog(
 
 def rank_tracks(tracks: Iterable[TabletopAudioTrack], query: str, limit: int = 10) -> tuple[TabletopAudioTrack, ...]:
     """Rank local metadata deterministically; an empty query returns no matches."""
-    if not isinstance(query, str) or not query.strip() or limit <= 0:
+    if (
+        not isinstance(query, str)
+        or not query.strip()
+        or not isinstance(limit, int)
+        or isinstance(limit, bool)
+        or limit <= 0
+    ):
         return ()
     terms = tuple(dict.fromkeys(word.casefold() for word in _WORD_RE.findall(query)))
     scored: list[tuple[int, str, str, TabletopAudioTrack]] = []

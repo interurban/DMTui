@@ -13,8 +13,7 @@ import tabletop_audio as ta
 
 HTML = """
 <div class="col-md-3 mix dungeon dark">
-  <div class="track_title"><h3>Goblin Camp</h3></div>
-  <div class="track_type">ambience + music</div>
+  <div class="track_title"><h3>Goblin Camp</h3><i>ambience + music</i></div>
   <p class="description">Smoke, drums, and watchfires.</p>
   <span class="saveButton"><a onclick="saveAs('Goblin_Camp')">Save</a></span>
 </div>
@@ -32,6 +31,12 @@ HTML = """
 </div>
 """
 
+TYPE_HTML = """
+<div class="col-md-3 mix one"><div class="track_title"><h3>One</h3><i>ambience + minimal music</i></div><p class="flavor">one</p><a onclick="saveAs('one')">Save</a></div>
+<div class="col-md-3 mix two"><div class="track_title"><h3>Two</h3><i>music + ambience</i></div><p class="flavor">two</p><a onclick="saveAs('two')">Save</a></div>
+<div class="col-md-3 mix three"><div class="track_title"><h3>Three</h3><i>music + minimal ambience</i></div><p class="flavor">three</p><a onclick="saveAs('three')">Save</a></div>
+"""
+
 
 def test_parse_and_exclude_non_public_or_invalid_actions() -> None:
     tracks = ta.parse_catalog_html(HTML)
@@ -40,7 +45,7 @@ def test_parse_and_exclude_non_public_or_invalid_actions() -> None:
     assert track.title == "Goblin Camp"
     assert track.audio_type == "ambience + music"
     assert track.description == "Smoke, drums, and watchfires."
-    assert track.categories == ("dark", "dungeon")
+    assert track.categories == ("dungeon", "dark")
 
 
 def test_secure_url_derivation() -> None:
@@ -52,6 +57,41 @@ def test_secure_url_derivation() -> None:
             pass
         else:
             raise AssertionError("unsafe slug was accepted")
+
+
+def test_displayed_type_variants_are_preserved_without_ontology() -> None:
+    assert [track.audio_type for track in ta.parse_catalog_html(TYPE_HTML)] == [
+        "ambience + minimal music",
+        "music + ambience",
+        "music + minimal ambience",
+    ]
+
+
+def test_track_model_is_immutable_and_rejects_malformed_fields() -> None:
+    track = ta.TabletopAudioTrack("safe", "Safe", "music", "desc", ["forest"])
+    assert track.categories == ("forest",)
+    try:
+        track.title = "changed"
+    except Exception:
+        pass
+    else:
+        raise AssertionError("frozen track was mutable")
+    invalid = [
+        {"title": 3},
+        {"audio_type": 3},
+        {"description": 3},
+        {"categories": "forest"},
+        {"categories": ["forest", 3]},
+    ]
+    for changes in invalid:
+        values = {"slug": "safe", "title": "Safe", "audio_type": "music", "description": "desc", "categories": ()}
+        values.update(changes)
+        try:
+            ta.TabletopAudioTrack(**values)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"malformed metadata accepted: {changes}")
 
 
 def _cache(path: str, timestamp: float = 100.0) -> None:
@@ -91,9 +131,69 @@ def test_cache_write_failure_does_not_discard_tracks() -> None:
         assert result.status == "network" and result.tracks
 
 
+def test_malformed_cache_refreshes_or_normalizes_failure_and_ignores_url() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "catalog.json")
+        with open(path, "w", encoding="utf-8") as output:
+            json.dump({"fetched_at": 100, "tracks": [{"slug": "safe", "title": 3}]}, output)
+        refreshed = ta.load_catalog(path, now=101, fetcher=lambda: HTML)
+        assert refreshed.status == "network"
+        with open(path, "w", encoding="utf-8") as output:
+            json.dump({"fetched_at": 100, "tracks": [{"slug": "safe", "title": 3}]}, output)
+        try:
+            ta.load_catalog(path, now=101, fetcher=lambda: (_ for _ in ()).throw(OSError("offline")))
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("malformed cache bypassed normalized failure")
+        track = ta.parse_catalog_html(HTML)[0]
+        with open(path, "w", encoding="utf-8") as output:
+            json.dump({"fetched_at": 100, "tracks": [{**track.as_cache_dict(), "url": "https://evil.example/x.mp3"}]}, output)
+        loaded = ta.load_catalog(path, now=101, fetcher=lambda: (_ for _ in ()).throw(AssertionError()))
+        assert loaded.tracks[0].playback_url == "https://sounds.tabletopaudio.com/Goblin_Camp.mp3"
+
+
+def test_actual_fetch_uses_https_request_user_agent_and_timeout() -> None:
+    calls = []
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return HTML.encode("utf-8")
+
+    def fake_urlopen(request, timeout):
+        calls.append((request, timeout))
+        return Response()
+
+    original = ta.urlopen
+    ta.urlopen = fake_urlopen
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            result = ta.load_catalog(os.path.join(tmp, "catalog.json"), now=100, timeout=3.25)
+    finally:
+        ta.urlopen = original
+    request, timeout = calls[0]
+    assert result.status == "network" and request.full_url == ta.CATALOG_URL and timeout == 3.25
+    assert request.get_header("User-agent") == ta.USER_AGENT
+
+
 def test_ranking_is_local_weighted_and_explicit_for_empty_queries() -> None:
-    tracks = ta.parse_catalog_html(HTML)
-    assert ta.rank_tracks(tracks, "goblin", limit=1)[0].slug == "Goblin_Camp"
+    tracks = (
+        ta.TabletopAudioTrack("title", "Dragon", "quiet", "plain", ()),
+        ta.TabletopAudioTrack("category", "Plain", "quiet", "plain", ("dragon",)),
+        ta.TabletopAudioTrack("kind", "Plain", "dragon", "plain", ()),
+        ta.TabletopAudioTrack("description", "Plain", "quiet", "dragon", ()),
+        ta.TabletopAudioTrack("z", "Echo", "quiet", "plain", ("same",)),
+        ta.TabletopAudioTrack("a", "Echo", "quiet", "plain", ("same",)),
+    )
+    assert [track.slug for track in ta.rank_tracks(tracks, "dragon")] == ["title", "category", "kind", "description"]
+    assert [track.slug for track in ta.rank_tracks(tracks, "same", limit=1)] == ["a"]
+    assert len(ta.rank_tracks(tracks, "plain", limit=2)) == 2
     assert ta.rank_tracks(tracks, "", limit=1) == ()
     assert ta.rank_tracks(tracks, "spaceship") == ()
 
@@ -121,6 +221,14 @@ def test_loop_config_validation_and_exact_player_commands() -> None:
     player = music.MusicPlayer(backend="ffplay", volume=40, which=lambda _name: "/bin/player", popen=lambda command, **kwargs: calls.append(command) or _Process())
     player.play(music.MusicSource("Loop", "https://a", loop=True))
     assert calls[-1] == ["/bin/player", "-nodisp", "-autoexit", "-loglevel", "error", "-volume", "40", "-loop", "0", "https://a"]
+    player.stop()
+    player = music.MusicPlayer(backend="mpv", volume=40, which=lambda _name: "/bin/player", popen=lambda command, **kwargs: calls.append(command) or _Process())
+    player.play(music.MusicSource("Default", "https://a"))
+    assert calls[-1] == ["/bin/player", "--no-video", "--really-quiet", "--force-window=no", "--volume=40", "https://a"]
+    player.stop()
+    player = music.MusicPlayer(backend="ffplay", volume=40, which=lambda _name: "/bin/player", popen=lambda command, **kwargs: calls.append(command) or _Process())
+    player.play(music.MusicSource("Default", "https://a", loop=False))
+    assert calls[-1] == ["/bin/player", "-nodisp", "-autoexit", "-loglevel", "error", "-volume", "40", "https://a"]
 
 
 class _Process:
