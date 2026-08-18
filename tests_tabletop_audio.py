@@ -43,6 +43,12 @@ PROMO_HTML = """
 <a onclick="saveAs('watchtower')">Save</a></div>
 """
 
+PDF_PROMO_HTML = """
+<div class="col-md-3 mix vault"><div class="track_title"><h3>Vault of Terror</h3><i>ambience + music</i></div>
+<p class="flavor">A collaboration with world-class adventure designer DMDave! [Alternate versions, plus adventure PDF available for <a href="https://patreon.com/tabletopaudio">Patreon Patrons</a>]</p>
+<a onclick="saveAs('252_Vault_of_Terror')">Save</a></div>
+"""
+
 
 def test_parse_and_exclude_non_public_or_invalid_actions() -> None:
     tracks = ta.parse_catalog_html(HTML)
@@ -74,6 +80,7 @@ def test_displayed_type_variants_are_preserved_without_ontology() -> None:
 
 
 def test_patreon_alternate_promotion_is_removed_from_flavor_only() -> None:
+    assert ta.parse_catalog_html(PDF_PROMO_HTML)[0].description == "A collaboration with world-class adventure designer DMDave!"
     variants = (
         "Alternate versions available for Patreon Patrons",
         "[Alternate version available for Patreon Patrons]",
