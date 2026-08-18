@@ -133,14 +133,30 @@ boundary:
 }
 ```
 
-Add, remove, or replace source entries without changing Python. `auto` prefers
+Add, remove, or replace source entries without changing Python. An optional
+boolean `loop` key keeps an individual configured stream looping. `auto` prefers
 `mpv` and falls back to `ffplay`; set the backend explicitly to either name if
 needed. Set `WARD_MUSIC_CONFIG=/path/to/music.json` to keep a personal catalog
 outside the checkout or override the packaged default. Sources are passed to
 the player as arguments, never through a shell.
 The starter station is SomaFM's permanent external-player playlist for
 [Drone Zone](https://somafm.com/dronezone/directstreamlinks.html), offered for
-individual personal listening. Streaming is disabled with `WARD_OFFLINE=1`.
+individual personal listening.
+
+When online, **Suggest Tabletop Audio** offers up to five encounter-aware picks
+from Tabletop Audio's entirely free public, downloadable 10-minute tracks. Ward
+uses the current encounter name, non-PC foes and round (never party names), then
+ranks the public metadata locally. If the existing optional OpenAI setup is
+available it can expand only mood/setting vocabulary and exact catalog
+categories; an unavailable or failed helper simply falls back to local encounter
+terms. SoundPads and Patreon content are excluded. Selecting a result streams
+its public MP3 directly to `mpv`/`ffplay` and loops it; Ward never downloads or
+caches audio. Catalog metadata is cached for 24 hours at
+`.cache/tabletop_audio/catalog.json`, with a brief stale-cache fallback if a
+refresh fails. Results visibly credit **Tabletop Audio · CC BY-NC-ND 4.0**.
+Configured streams remain available alongside these suggestions. `WARD_OFFLINE=1`
+keeps any active playback controls but disables catalog/API fetching and cannot
+play cached Tabletop Audio audio.
 
 ### DM Screen mode
 

@@ -325,18 +325,24 @@ class EncounterPreviewModal(ModalScreen[str]):
 
 
 class GeneratingModal(ModalScreen[None]):
-    """Block input while an encounter suggestion is being generated."""
+    """Block input while a cancellable background suggestion is generated."""
 
     BINDINGS = [("escape", "cancel", "Cancel")]
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        title: str = "Building encounter…",
+        detail: str = "Choosing existing monster statblocks — one moment.",
+    ) -> None:
         super().__init__()
         self.cancelled = False
+        self._title = title
+        self._detail = detail
 
     def compose(self) -> ComposeResult:
         with Container(classes="modal-box"):
-            yield Static("[bold #a8d0ff]Building encounter…[/]", classes="modal-title")
-            yield Static("[dim]Choosing existing monster statblocks — one moment.[/]")
+            yield Static(f"[bold #a8d0ff]{escape(self._title)}[/]", classes="modal-title")
+            yield Static(f"[dim]{escape(self._detail)}[/]")
 
     def action_cancel(self) -> None:
         self.cancelled = True

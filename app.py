@@ -49,6 +49,7 @@ import ddb
 import encounter_store
 import music
 import openai_client
+import tabletop_audio
 import ward_backup
 from ddb import ABILITY_NAMES
 from modals import (
@@ -77,6 +78,9 @@ ENCOUNTER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "encou
 CAMPAIGN_ENCOUNTERS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "campaign-encounters.json")
 BACKUP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ward-backups")
 MUSIC_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ward", "music_config.json")
+TABLETOP_AUDIO_CACHE_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), ".cache", "tabletop_audio", "catalog.json"
+)
 
 DEFAULT_RULESET = campaign_store.DEFAULT_RULESET
 
@@ -1176,6 +1180,140 @@ class BattleApp(App[None]):
         state = "Paused" if self._music.paused else "Playing"
         return f"{state} · {source.name}"
 
+    def _music_encounter_context(self) -> str:
+        """Describe only public encounter state relevant to a soundtrack search."""
+        pc_names = [c.name.strip() for c in self.combatants if c.kind == "PC" and c.name.strip()]
+        encounter_name = self._session_encounter_name.strip()
+        for name in pc_names:
+            encounter_name = re.sub(re.escape(name), "", encounter_name, flags=re.IGNORECASE)
+        encounter_name = re.sub(r"\s+", " ", encounter_name).strip(" -·,:;")
+        groups: dict[str, int] = {}
+        for creature in self.combatants:
+            if creature.kind == "PC":
+                continue
+            name = re.sub(r"\s+\d+$", "", creature.name.strip()) or "unknown foe"
+            groups[name] = groups.get(name, 0) + 1
+        opponents = ", ".join(
+            f"{count} {name}{'' if count == 1 else 's'}"
+            for name, count in sorted(groups.items(), key=lambda item: item[0].casefold())
+        )
+        details = []
+        if encounter_name:
+            details.append(f"Encounter: {encounter_name}")
+        if opponents:
+            details.append(f"Opponents: {opponents}")
+        if details:
+            details.append(f"Round {self.round}; phase: combat")
+            return ". ".join(details) + "."
+        return "Fantasy tabletop encounter: tense adventure, exploration, or combat."
+
+    def _sync_music_status(self) -> None:
+        self.query_one("#music-status", MusicStatus).sync_playback()
+
+    def _play_music_source(self, source: music.MusicSource, *, attribution: str = "") -> bool:
+        """Start a source and keep the existing player/status reporting consistent."""
+        try:
+            backend = self._music.play(source)
+        except RuntimeError as exc:
+            self._log(f"Music could not start: {escape(str(exc))}", kind="warn")
+            return False
+        note = f" · {escape(attribution)}" if attribution else ""
+        self._log(
+            f"Music playing · {escape(source.name)} via {escape(backend)}{note}. "
+            "[bold]Ctrl+K[/] opens controls.",
+            kind="music",
+        )
+        self._sync_music_status()
+        return True
+
+    async def _tabletop_audio_flow(self) -> None:
+        """Load public metadata, locally rank it, then play only a confirmed result."""
+        if _offline_mode():
+            self._log("Tabletop Audio suggestions need an online catalog and are unavailable offline.", kind="warn")
+            return
+        loading = GeneratingModal("Finding Tabletop Audio…", "Loading public track metadata — one moment.")
+        self.push_screen(loading)
+        try:
+            catalog = await run_in_thread(tabletop_audio.load_catalog, TABLETOP_AUDIO_CACHE_PATH)
+        except Exception as exc:
+            self._log(f"Tabletop Audio suggestions unavailable: {escape(str(exc))}", kind="warn")
+            return
+        finally:
+            if not loading.cancelled and loading.is_mounted:
+                loading.dismiss()
+        if loading.cancelled:
+            self._log("Tabletop Audio search cancelled.", kind="select")
+            return
+        if catalog.status == "stale-cache":
+            self._log("Tabletop Audio catalog refresh failed; using stale metadata.", kind="warn")
+
+        context = self._music_encounter_context()
+        categories = tuple(sorted({category for track in catalog.tracks for category in track.categories}, key=str.casefold))
+        detail = ""
+        while True:
+            ai_terms: tuple[str, ...] = ()
+            ai_categories: tuple[str, ...] = ()
+            try:
+                ai_terms, ai_categories = await run_in_thread(
+                    openai_client.music_search_terms, context, categories
+                )
+            except Exception:
+                self._log("Music AI helper unavailable; using local encounter search.", kind="info")
+            query = " ".join(part for part in (context, detail, *ai_terms, *ai_categories) if part).strip()
+            tracks = tabletop_audio.rank_tracks(catalog.tracks, query, limit=5)
+            options: list[tuple[str, str]] = []
+            for track in tracks:
+                description = " ".join(track.description.split())
+                if len(description) > 100:
+                    description = description[:97].rstrip() + "…"
+                category_text = ", ".join(track.categories) or "Uncategorized"
+                options.append(
+                    (
+                        f"tta:{track.slug}",
+                        folio_choice(
+                            "PLAY",
+                            escape(track.title),
+                            f"{escape(track.audio_type)} · {escape(description)} · {escape(category_text)}",
+                        ),
+                    )
+                )
+            if not tracks:
+                options.append(("none", "[#7d8794]No matching public tracks yet.[/]"))
+            options.extend([
+                ("refine", folio_choice("REFINE", "Search mood or keywords", "Required for a narrower local match")),
+                ("back", "[#717b89]Back to music[/]"),
+            ])
+            picked = await self.push_screen(
+                ListModal(
+                    "TABLETOP AUDIO · ENCOUNTER SUGGESTIONS · CC BY-NC-ND 4.0",
+                    options,
+                    wide=True,
+                    compact=True,
+                ),
+                wait_for_dismiss=True,
+            )
+            if picked == "refine":
+                detail = await self.push_screen(
+                    TextModal("REFINE TABLETOP AUDIO", "required: ominous rain, chase, candlelit ruins", confirm="Search"),
+                    wait_for_dismiss=True,
+                ) or ""
+                if not detail:
+                    continue
+                continue
+            if not picked or picked in {"back", "none"}:
+                return
+            if picked.startswith("tta:"):
+                slug = picked.removeprefix("tta:")
+                track = next((item for item in tracks if item.slug == slug), None)
+                if track is None:
+                    self._log("That Tabletop Audio selection is no longer available.", kind="warn")
+                    return
+                self._play_music_source(
+                    music.MusicSource(track.title, track.playback_url, note="Tabletop Audio", loop=True),
+                    attribution="Tabletop Audio · CC BY-NC-ND 4.0",
+                )
+                return
+
     async def _music_flow(self) -> None:
         config: music.MusicConfig | None = None
         if _offline_mode() and not self._music.active:
@@ -1214,6 +1352,10 @@ class BattleApp(App[None]):
                 )
                 for index, source in enumerate(config.sources)
             )
+        if not _offline_mode():
+            options.append(("suggest-tabletop", folio_choice(
+                "SUGGEST", "Tabletop Audio", "Free public 10-minute tracks · encounter-aware",
+            )))
         options.append(("back", "[#717b89]Back to Ward[/]"))
         picked = await self.push_screen(
             ListModal(
@@ -1231,25 +1373,21 @@ class BattleApp(App[None]):
                 self._log(f"Music could not be changed: {escape(str(exc))}", kind="warn")
                 return
             self._log(f"Music {'paused' if paused else 'resumed'} · {escape(current.name)}.", kind="music")
-            self.query_one("#music-status", MusicStatus).sync_playback()
+            self._sync_music_status()
         elif picked == "stop":
             name = current.name if current is not None else "stream"
             self._music.stop()
             self._log(f"Music stopped · {escape(name)}.", kind="music")
-            self.query_one("#music-status", MusicStatus).sync_playback()
+            self._sync_music_status()
+        elif picked == "suggest-tabletop":
+            await self._tabletop_audio_flow()
         elif picked and picked.startswith("play:") and config is not None:
             try:
                 source = config.sources[int(picked[5:])]
-                backend = self._music.play(source)
-            except (IndexError, ValueError, RuntimeError) as exc:
+            except (IndexError, ValueError) as exc:
                 self._log(f"Music could not start: {escape(str(exc))}", kind="warn")
                 return
-            self._log(
-                f"Music playing · {escape(source.name)} via {escape(backend)}. "
-                "[bold]Ctrl+K[/] opens controls.",
-                kind="music",
-            )
-            self.query_one("#music-status", MusicStatus).sync_playback()
+            self._play_music_source(source)
 
     async def _campaign_flow(self) -> None:
         data = self._campaigns_read()

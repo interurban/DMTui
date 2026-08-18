@@ -120,6 +120,111 @@ def chat(question: str, context: str, *, config: dict | None = None) -> str:
     return answer
 
 
+def music_search_terms(
+    encounter_context: str,
+    available_categories: list[str] | tuple[str, ...],
+    *,
+    config: dict | None = None,
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Expand an encounter into safe local-catalog search vocabulary.
+
+    The model receives category names, never tracks or URLs.  The caller still
+    ranks only its own catalog metadata, so this helper cannot select or invent
+    playable audio.
+    """
+    if not isinstance(encounter_context, str) or not encounter_context.strip():
+        raise ValueError("Encounter context is required for music search")
+    if isinstance(available_categories, (str, bytes)):
+        raise ValueError("Available music categories must be a sequence")
+    categories = tuple(
+        dict.fromkeys(
+            category.strip()
+            for category in available_categories
+            if isinstance(category, str) and category.strip()
+        )
+    )
+    if len(categories) > 80:
+        categories = categories[:80]
+
+    config, api_key, model, options = _client_settings(config)
+    category_items: dict = {"type": "string"}
+    if categories:
+        category_items["enum"] = list(categories)
+    payload = {
+        "model": model,
+        "temperature": float(options.get("music_temperature", 0)),
+        "max_tokens": int(options.get("music_max_tokens", 120)),
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "music_search_terms",
+                "strict": True,
+                "schema": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "terms": {
+                            "type": "array",
+                            "minItems": 0,
+                            "maxItems": 8,
+                            "items": {"type": "string", "minLength": 1, "maxLength": 48},
+                        },
+                        "categories": {
+                            "type": "array",
+                            "minItems": 0,
+                            "maxItems": 8,
+                            "items": category_items,
+                        },
+                    },
+                    "required": ["terms", "categories"],
+                },
+            },
+        },
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "Return only search vocabulary for a local Tabletop Audio catalog. "
+                    "Do not name tracks, URLs, artists, download ids, or playback instructions. "
+                    "Use concise mood, setting, and action words. Categories must exactly match the supplied list."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Encounter context:\n{encounter_context.strip()}\n\n"
+                    f"Allowed categories (exact spelling only):\n{', '.join(categories) or '(none)'}"
+                ),
+            },
+        ],
+    }
+    content = _choice_content(_post_json(config, api_key, payload), "OpenAI returned empty music search terms")
+    try:
+        result = json.loads(content)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("OpenAI returned invalid music search JSON") from exc
+    if not isinstance(result, dict) or set(result) != {"terms", "categories"}:
+        raise RuntimeError("OpenAI returned malformed music search terms")
+    terms = result.get("terms")
+    picked_categories = result.get("categories")
+    if not isinstance(terms, list) or not isinstance(picked_categories, list):
+        raise RuntimeError("OpenAI returned malformed music search terms")
+    if len(terms) > 8 or len(picked_categories) > 8:
+        raise RuntimeError("OpenAI returned too many music search terms")
+
+    cleaned_terms: list[str] = []
+    for term in terms:
+        if not isinstance(term, str):
+            raise RuntimeError("OpenAI returned malformed music search terms")
+        term = " ".join(term.split())
+        if not term or len(term) > 48 or re.search(r"://|[\\/\\\\]|\.(?:mp3|m3u|wav)\b", term, re.I):
+            raise RuntimeError("OpenAI returned unsafe music search terms")
+        cleaned_terms.append(term)
+    if any(not isinstance(category, str) or category not in categories for category in picked_categories):
+        raise RuntimeError("OpenAI returned an unknown music category")
+    return tuple(dict.fromkeys(cleaned_terms)), tuple(dict.fromkeys(picked_categories))
+
+
 def plan_encounter(
     description: str,
     available_names: list[str],
