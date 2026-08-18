@@ -1189,16 +1189,21 @@ class BattleApp(App[None]):
     def _music_encounter_context(self) -> str:
         """Describe only public encounter state relevant to a soundtrack search."""
         private_names = {c.name.strip() for c in self.combatants if c.kind == "PC" and c.name.strip()}
-        try:
-            saved_party = self._campaign_party(self._session_campaign)
-        except Exception:
-            saved_party = []
+        saved_party: list[dict] = []
+        roster_available = True
+        if self._session_campaign is not None:
+            try:
+                saved_party = self._campaign_party(self._session_campaign)
+            except Exception:
+                roster_available = False
         private_names.update(
             member["name"].strip()
             for member in saved_party
             if isinstance(member, dict) and isinstance(member.get("name"), str) and member["name"].strip()
         )
         encounter_name = self._session_encounter_name.strip()
+        if not roster_available:
+            encounter_name = ""
         for name in private_names:
             encounter_name = re.sub(re.escape(name), "", encounter_name, flags=re.IGNORECASE)
         encounter_name = re.sub(r"\s+", " ", encounter_name).strip(" -·,:;")
@@ -1345,7 +1350,13 @@ class BattleApp(App[None]):
                     self._log("That Tabletop Audio selection is no longer available.", kind="warn")
                     return True
                 if not self._play_music_source(
-                    music.MusicSource(track.title, track.playback_url, note="Tabletop Audio", loop=True),
+                    music.MusicSource(
+                        track.title,
+                        track.playback_url,
+                        note="Tabletop Audio",
+                        loop=True,
+                        referrer=tabletop_audio.CATALOG_URL,
+                    ),
                     attribution="Tabletop Audio · CC BY-NC-ND 4.0",
                 ):
                     return True

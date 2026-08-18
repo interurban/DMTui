@@ -9,7 +9,9 @@ import urllib.error
 import urllib.request
 
 
-CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "llm_config.json")
+MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
+CONFIG_PATH = os.path.join(MODULE_DIR, "llm_config.json")
+PACKAGED_CONFIG_PATH = os.path.join(MODULE_DIR, "ward", "llm_config.json")
 
 
 def _load_dotenv(path: str) -> None:
@@ -32,7 +34,10 @@ def _load_dotenv(path: str) -> None:
             os.environ[key] = value
 
 
-def load_config(path: str = CONFIG_PATH) -> dict:
+def load_config(path: str | None = None) -> dict:
+    """Load checkout defaults when present, otherwise the packaged defaults."""
+    if path is None:
+        path = CONFIG_PATH if os.path.exists(CONFIG_PATH) else PACKAGED_CONFIG_PATH
     _load_dotenv(os.path.join(os.path.dirname(path), ".env"))
     with open(path, encoding="utf-8") as config_file:
         config = json.load(config_file)

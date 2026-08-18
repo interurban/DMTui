@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+import tempfile
 from unittest import mock
 
 import app as appmod
@@ -61,6 +62,22 @@ def test_music_search_terms_uses_strict_categories_and_rejects_malformed_output(
             raise AssertionError("unsafe terms and unknown categories must be rejected")
 
 
+def test_openai_config_falls_back_to_packaged_defaults_without_checkout_file():
+    with tempfile.TemporaryDirectory() as tmp:
+        missing_root = os.path.join(tmp, "llm_config.json")
+        explicit = os.path.join(tmp, "custom.json")
+        with open(explicit, "w", encoding="utf-8") as config_file:
+            json.dump({"model": "explicit-model"}, config_file)
+        with mock.patch.object(openai_client, "CONFIG_PATH", missing_root), \
+             mock.patch.dict(os.environ, {"OPENAI_API_KEY": "package-test-key"}, clear=False):
+            config = openai_client.load_config()
+            loaded, api_key, model, options = openai_client._client_settings(None)
+            assert config["model"] == "gpt-4o-mini"
+            assert loaded["model"] == "gpt-4o-mini"
+            assert (api_key, model, options["temperature"]) == ("package-test-key", "gpt-4o-mini", 0)
+            assert openai_client.load_config(explicit) == {"model": "explicit-model"}
+
+
 def test_music_context_groups_foes_and_excludes_party_names():
     app = BattleApp()
     app._session_encounter_name = "Zephyr's Old Toll Road Ambush"
@@ -82,10 +99,13 @@ def test_music_context_groups_foes_and_excludes_party_names():
 
     app._session_campaign = "Saved party"
     app._session_encounter_name = "Nora's Moonlit Ruins"
+    app.combatants = [Combatant("Goblin", "monster", hp=7, max_hp=7, ac=12)]
     app._campaign_party = lambda _name: [{"name": "Nora"}]
     assert "Nora" not in app._music_encounter_context()
     app._campaign_party = lambda _name: (_ for _ in ()).throw(ValueError("bad campaign data"))
-    assert "Fantasy tabletop encounter" not in app._music_encounter_context()
+    failed_context = app._music_encounter_context()
+    assert "Nora" not in failed_context and "Encounter:" not in failed_context
+    assert "Round 4" in failed_context
 
 
 class _FlowApp(BattleApp):
@@ -318,6 +338,7 @@ def test_confirmed_catalog_track_streams_derived_looped_url_with_attribution():
         asyncio.run(app._tabletop_audio_flow())
     source, attribution = app.played[0]
     assert source.loop is True and source.url == track.playback_url
+    assert source.referrer == tabletop_audio.CATALOG_URL
     assert attribution == "Tabletop Audio · CC BY-NC-ND 4.0"
     menu = next(screen for screen in app.screens if isinstance(screen, ListModal))
     assert "TABLETOP AUDIO" in menu._title and "CC BY-NC-ND 4.0" in menu._title
