@@ -15,6 +15,7 @@ class MusicSource:
     name: str
     url: str
     note: str = ""
+    loop: bool = False
 
 
 @dataclass(frozen=True)
@@ -53,9 +54,12 @@ def load_config(path: str) -> MusicConfig:
         name = str(entry.get("name") or "").strip()
         url = str(entry.get("url") or "").strip()
         note = str(entry.get("note") or "").strip()
+        loop = entry.get("loop", False)
+        if not isinstance(loop, bool):
+            raise ValueError(f"Music source {index} loop must be a boolean")
         if not name or not url:
             raise ValueError(f"Music source {index} needs a name and URL")
-        sources.append(MusicSource(name=name, url=url, note=note))
+        sources.append(MusicSource(name=name, url=url, note=note, loop=loop))
     if not sources:
         raise ValueError("Music config needs at least one source")
     return MusicConfig(backend=backend, volume=volume, sources=tuple(sources))
@@ -113,7 +117,7 @@ class MusicPlayer:
         wanted = "mpv or ffplay" if self.backend == "auto" else self.backend
         raise RuntimeError(f"No music player found; install {wanted} or change the Ward music config")
 
-    def _command(self, backend: str, executable: str, url: str) -> list[str]:
+    def _command(self, backend: str, executable: str, source: MusicSource) -> list[str]:
         if backend == "mpv":
             return [
                 executable,
@@ -121,7 +125,8 @@ class MusicPlayer:
                 "--really-quiet",
                 "--force-window=no",
                 f"--volume={self.volume}",
-                url,
+                *(["--loop=inf"] if source.loop else []),
+                source.url,
             ]
         return [
             executable,
@@ -131,7 +136,8 @@ class MusicPlayer:
             "error",
             "-volume",
             str(self.volume),
-            url,
+            *(["-loop", "0"] if source.loop else []),
+            source.url,
         ]
 
     def play(self, source: MusicSource) -> str:
@@ -139,7 +145,7 @@ class MusicPlayer:
         backend, executable = self._resolve_backend()
         try:
             self._process = self._popen(
-                self._command(backend, executable, source.url),
+                self._command(backend, executable, source),
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
