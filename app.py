@@ -1226,24 +1226,24 @@ class BattleApp(App[None]):
         self._sync_music_status()
         return True
 
-    async def _tabletop_audio_flow(self) -> None:
-        """Load public metadata, locally rank it, then play only a confirmed result."""
+    async def _tabletop_audio_flow(self) -> bool:
+        """Load/rank public metadata; return whether to reopen music controls."""
         if _offline_mode():
             self._log("Tabletop Audio suggestions need an online catalog and are unavailable offline.", kind="warn")
-            return
+            return True
         loading = GeneratingModal("Finding Tabletop Audio…", "Loading public track metadata — one moment.")
         self.push_screen(loading)
         try:
             catalog = await run_in_thread(tabletop_audio.load_catalog, TABLETOP_AUDIO_CACHE_PATH)
         except Exception as exc:
             self._log(f"Tabletop Audio suggestions unavailable: {escape(str(exc))}", kind="warn")
-            return
+            return True
         finally:
             if not loading.cancelled and loading.is_mounted:
                 loading.dismiss()
         if loading.cancelled:
             self._log("Tabletop Audio search cancelled.", kind="select")
-            return
+            return True
         if catalog.status == "stale-cache":
             self._log("Tabletop Audio catalog refresh failed; using stale metadata.", kind="warn")
 
@@ -1300,19 +1300,21 @@ class BattleApp(App[None]):
                 if not detail:
                     continue
                 continue
-            if not picked or picked in {"back", "none"}:
-                return
+            if picked == "none":
+                continue
+            if not picked or picked == "back":
+                return True
             if picked.startswith("tta:"):
                 slug = picked.removeprefix("tta:")
                 track = next((item for item in tracks if item.slug == slug), None)
                 if track is None:
                     self._log("That Tabletop Audio selection is no longer available.", kind="warn")
-                    return
+                    return True
                 self._play_music_source(
                     music.MusicSource(track.title, track.playback_url, note="Tabletop Audio", loop=True),
                     attribution="Tabletop Audio · CC BY-NC-ND 4.0",
                 )
-                return
+                return False
 
     async def _music_flow(self) -> None:
         config: music.MusicConfig | None = None
@@ -1331,63 +1333,69 @@ class BattleApp(App[None]):
             else:
                 self._music.configure(config.backend, config.volume)
 
-        options: list[tuple[str, str]] = []
-        current = self._music.source
-        if current is not None:
-            pause_verb = "RESUME" if self._music.paused else "PAUSE"
-            pause_title = escape(current.name)
-            options.extend([
-                ("pause", folio_choice(pause_verb, pause_title)),
-                ("stop", folio_choice("STOP", escape(current.name))),
-            ])
-        if config is not None:
-            options.extend(
-                (
-                    f"play:{index}",
-                    folio_choice(
-                        "PLAY",
-                        escape(source.name),
-                        escape(source.note) if source.note else "Configured stream",
-                    ),
+        while True:
+            options: list[tuple[str, str]] = []
+            current = self._music.source
+            if current is not None:
+                pause_verb = "RESUME" if self._music.paused else "PAUSE"
+                pause_title = escape(current.name)
+                options.extend([
+                    ("pause", folio_choice(pause_verb, pause_title)),
+                    ("stop", folio_choice("STOP", escape(current.name))),
+                ])
+            if config is not None:
+                options.extend(
+                    (
+                        f"play:{index}",
+                        folio_choice(
+                            "PLAY",
+                            escape(source.name),
+                            escape(source.note) if source.note else "Configured stream",
+                        ),
+                    )
+                    for index, source in enumerate(config.sources)
                 )
-                for index, source in enumerate(config.sources)
+            if not _offline_mode():
+                options.append(("suggest-tabletop", folio_choice(
+                    "SUGGEST", "Tabletop Audio", "Free public 10-minute tracks · encounter-aware",
+                )))
+            options.append(("back", "[#717b89]Back to Ward[/]"))
+            picked = await self.push_screen(
+                ListModal(
+                    f"MUSIC · {escape(self._music_status().upper())}",
+                    options,
+                    wide=True,
+                    compact=True,
+                ),
+                wait_for_dismiss=True,
             )
-        if not _offline_mode():
-            options.append(("suggest-tabletop", folio_choice(
-                "SUGGEST", "Tabletop Audio", "Free public 10-minute tracks · encounter-aware",
-            )))
-        options.append(("back", "[#717b89]Back to Ward[/]"))
-        picked = await self.push_screen(
-            ListModal(
-                f"MUSIC · {escape(self._music_status().upper())}",
-                options,
-                wide=True,
-                compact=True,
-            ),
-            wait_for_dismiss=True,
-        )
-        if picked == "pause":
-            try:
-                paused = self._music.toggle_pause()
-            except RuntimeError as exc:
-                self._log(f"Music could not be changed: {escape(str(exc))}", kind="warn")
+            if picked == "pause":
+                try:
+                    paused = self._music.toggle_pause()
+                except RuntimeError as exc:
+                    self._log(f"Music could not be changed: {escape(str(exc))}", kind="warn")
+                    return
+                self._log(f"Music {'paused' if paused else 'resumed'} · {escape(current.name)}.", kind="music")
+                self._sync_music_status()
                 return
-            self._log(f"Music {'paused' if paused else 'resumed'} · {escape(current.name)}.", kind="music")
-            self._sync_music_status()
-        elif picked == "stop":
-            name = current.name if current is not None else "stream"
-            self._music.stop()
-            self._log(f"Music stopped · {escape(name)}.", kind="music")
-            self._sync_music_status()
-        elif picked == "suggest-tabletop":
-            await self._tabletop_audio_flow()
-        elif picked and picked.startswith("play:") and config is not None:
-            try:
-                source = config.sources[int(picked[5:])]
-            except (IndexError, ValueError) as exc:
-                self._log(f"Music could not start: {escape(str(exc))}", kind="warn")
+            if picked == "stop":
+                name = current.name if current is not None else "stream"
+                self._music.stop()
+                self._log(f"Music stopped · {escape(name)}.", kind="music")
+                self._sync_music_status()
                 return
-            self._play_music_source(source)
+            if picked == "suggest-tabletop":
+                if await self._tabletop_audio_flow():
+                    continue
+                return
+            if picked and picked.startswith("play:") and config is not None:
+                try:
+                    source = config.sources[int(picked[5:])]
+                except (IndexError, ValueError) as exc:
+                    self._log(f"Music could not start: {escape(str(exc))}", kind="warn")
+                    return
+                self._play_music_source(source)
+            return
 
     async def _campaign_flow(self) -> None:
         data = self._campaigns_read()

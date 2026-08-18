@@ -150,6 +150,27 @@ def test_music_no_results_can_refine_without_playing():
     assert not app.played
 
 
+def test_tabletop_audio_back_reopens_music_controls_for_results_and_no_results():
+    catalog = tabletop_audio.CatalogLoad((_track(),), "fresh-cache")
+
+    for has_results in (True, False):
+        app = _FlowApp(["suggest-tabletop", "back", "back"])
+        rank = (lambda _tracks, _query, limit=5: catalog.tracks) if has_results else (
+            lambda _tracks, _query, limit=5: ()
+        )
+        with mock.patch.object(appmod, "run_in_thread", _inline), \
+             mock.patch.object(tabletop_audio, "load_catalog", return_value=catalog), \
+             mock.patch.object(openai_client, "music_search_terms", return_value=((), ())), \
+             mock.patch.object(tabletop_audio, "rank_tracks", rank):
+            asyncio.run(app._music_flow())
+        menus = [screen for screen in app.screens if isinstance(screen, ListModal)]
+        assert len(menus) == 3
+        assert menus[0]._title.startswith("MUSIC ·")
+        assert menus[1]._title.startswith("TABLETOP AUDIO ·")
+        assert menus[2]._title.startswith("MUSIC ·")
+        assert any(key == "suggest-tabletop" for key, _label in menus[2]._options)
+
+
 def test_confirmed_catalog_track_streams_derived_looped_url_with_attribution():
     app = _FlowApp(["tta:crypt"])
     track = _track()
