@@ -30,6 +30,7 @@ py-modules = [
     "openai_client",
     "persistence",
     "srd",
+    "tabletop_audio",
     "ward_backup",
     "widgets",
 ]

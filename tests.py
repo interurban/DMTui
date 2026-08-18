@@ -2,6 +2,7 @@
 
 import asyncio
 import concurrent.futures
+import importlib
 import urllib.error
 import urllib.request
 import random
@@ -1901,11 +1902,28 @@ def test_srd_spells_fetch_and_cache():
             assert calls == []
 
 
+def _discovered_regression_tests():
+    """Load focused tests so ``python tests.py`` remains the project gate."""
+    discovered = []
+    root = os.path.dirname(os.path.abspath(__file__))
+    for filename in sorted(os.listdir(root)):
+        if not filename.startswith("tests_") or not filename.endswith(".py"):
+            continue
+        module = importlib.import_module(filename[:-3])
+        discovered.extend(
+            value
+            for name, value in sorted(vars(module).items())
+            if name.startswith("test_") and callable(value)
+        )
+    return discovered
+
+
 def main() -> None:
     tests = [
         value for name, value in sorted(globals().items())
         if name.startswith("test_") and callable(value)
     ]
+    tests.extend(_discovered_regression_tests())
     for test in tests:
         test()
     print(f"TESTS OK ({len(tests)} passed)")

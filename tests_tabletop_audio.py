@@ -106,6 +106,9 @@ def test_cache_fresh_refresh_stale_and_failure() -> None:
         _cache(path)
         fresh = ta.load_catalog(path, now=101, fetcher=lambda _timeout: (_ for _ in ()).throw(AssertionError()))
         assert fresh.status == "fresh-cache"
+        _cache(path, timestamp=200)
+        future = ta.load_catalog(path, now=100, fetcher=lambda _timeout: HTML)
+        assert future.status == "network"
         network = ta.load_catalog(path, now=100 + ta.CACHE_MAX_AGE_SECONDS + 1, fetcher=lambda _timeout: HTML)
         assert network.status == "network" and network.tracks[0].slug == "Goblin_Camp"
         stale = ta.load_catalog(path, now=100 + 2 * ta.CACHE_MAX_AGE_SECONDS + 2, fetcher=lambda _timeout: (_ for _ in ()).throw(OSError("offline")))
@@ -125,7 +128,7 @@ def test_cache_write_failure_does_not_discard_tracks() -> None:
         original = persistence.write_json_atomic
         persistence.write_json_atomic = lambda *args, **kwargs: (_ for _ in ()).throw(OSError("read-only"))
         try:
-            result = ta.load_catalog(path, now=100, fetcher=lambda: HTML)
+            result = ta.load_catalog(path, now=100, fetcher=lambda _timeout: HTML)
         finally:
             persistence.write_json_atomic = original
         assert result.status == "network" and result.tracks
@@ -136,12 +139,12 @@ def test_malformed_cache_refreshes_or_normalizes_failure_and_ignores_url() -> No
         path = os.path.join(tmp, "catalog.json")
         with open(path, "w", encoding="utf-8") as output:
             json.dump({"fetched_at": 100, "tracks": [{"slug": "safe", "title": 3}]}, output)
-        refreshed = ta.load_catalog(path, now=101, fetcher=lambda: HTML)
+        refreshed = ta.load_catalog(path, now=101, fetcher=lambda _timeout: HTML)
         assert refreshed.status == "network"
         with open(path, "w", encoding="utf-8") as output:
             json.dump({"fetched_at": 100, "tracks": [{"slug": "safe", "title": 3}]}, output)
         try:
-            ta.load_catalog(path, now=101, fetcher=lambda: (_ for _ in ()).throw(OSError("offline")))
+            ta.load_catalog(path, now=101, fetcher=lambda _timeout: (_ for _ in ()).throw(OSError("offline")))
         except RuntimeError:
             pass
         else:
@@ -149,7 +152,7 @@ def test_malformed_cache_refreshes_or_normalizes_failure_and_ignores_url() -> No
         track = ta.parse_catalog_html(HTML)[0]
         with open(path, "w", encoding="utf-8") as output:
             json.dump({"fetched_at": 100, "tracks": [{**track.as_cache_dict(), "url": "https://evil.example/x.mp3"}]}, output)
-        loaded = ta.load_catalog(path, now=101, fetcher=lambda: (_ for _ in ()).throw(AssertionError()))
+        loaded = ta.load_catalog(path, now=101, fetcher=lambda _timeout: (_ for _ in ()).throw(AssertionError()))
         assert loaded.tracks[0].playback_url == "https://sounds.tabletopaudio.com/Goblin_Camp.mp3"
 
 

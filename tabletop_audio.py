@@ -345,16 +345,14 @@ def load_catalog(
     """Load fresh metadata, refresh it, or fall back to valid stale metadata."""
     current = time.time() if now is None else float(now)
     cached = _read_cache(cache_path)
-    if cached is not None and current - cached[0] < CACHE_MAX_AGE_SECONDS and cached[1]:
+    cache_age = current - cached[0] if cached is not None else None
+    if cached is not None and cache_age is not None and 0 <= cache_age < CACHE_MAX_AGE_SECONDS and cached[1]:
         return CatalogLoad(cached[1], "fresh-cache")
     try:
         if fetcher is None:
             html = _fetch_catalog(timeout)
         else:
-            try:
-                html = fetcher(timeout)
-            except TypeError:
-                html = fetcher()  # convenient zero-argument test/application hook
+            html = fetcher(timeout)
         tracks = parse_catalog_html(html)
         if not tracks:
             raise ValueError("catalog contained no public downloads")
