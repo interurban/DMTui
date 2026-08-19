@@ -246,6 +246,31 @@ def test_ranking_is_local_weighted_and_explicit_for_empty_queries() -> None:
     assert ta.rank_tracks(noise, "out") == ()
 
 
+def test_ranking_filters_by_category_and_phase_terms_with_word_boundaries() -> None:
+    tracks = (
+        # fantasy + a whole-word "inn" in the description -> matches a town phase
+        ta.TabletopAudioTrack("tavern", "The Hearth Inn", "ambience", "a cozy inn by the fire", ("fantasy",)),
+        # "inn" only as a substring of "beginning" -> must NOT match a town phase
+        ta.TabletopAudioTrack("adventure", "Adventure Begins", "music", "every story has a beginning", ("fantasy",)),
+        # modern track -> excluded by the fantasy category requirement
+        ta.TabletopAudioTrack("mall", "Shopping Mall", "music", "a town shopping center", ("modern",)),
+        # fantasy but no town word -> excluded by the phase requirement
+        ta.TabletopAudioTrack("dragon", "Dragon Lair", "music", "a deadly dungeon", ("fantasy",)),
+    )
+    town_terms = ("town", "village", "city", "market", "inn", "tavern")
+    ranked = ta.rank_tracks(
+        tracks, "fantasy town", limit=5,
+        require_categories=("fantasy",),
+        require_terms=town_terms,
+        boost_terms=town_terms,
+    )
+    assert [track.slug for track in ranked] == ["tavern"]
+    # without the phase requirement the false-positive substring would sneak in
+    no_phase = ta.rank_tracks(tracks, "fantasy", limit=5, require_categories=("fantasy",))
+    assert any(track.slug == "adventure" for track in no_phase)
+    assert not any(track.slug == "mall" for track in no_phase)
+
+
 def test_loop_config_validation_and_exact_player_commands() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         path = os.path.join(tmp, "music.json")

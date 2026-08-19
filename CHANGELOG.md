@@ -46,6 +46,19 @@ Sprint log for Ward — a private, table-side tool for D&D Dungeon Masters
   entry). The redundant Find flow was removed, and `/` is labeled honestly as
   Ask AI. `Ctrl+M` remains unavailable because terminals encode it as Enter.
 
+## Tabletop Audio scene suggestions
+
+- The choose-a-scene menu dropped the redundant `PHASE` tag; each scene now reads
+  as its name with a plain description.
+- The encounter-suggestion rows dropped the `PLAY` tag so the track title and full
+  description get the width instead of a verb column.
+- A loading popup now stays on screen during the AI search so picking a scene no
+  longer looks like a crash before the suggestions return.
+- Suggestions are now filtered to the fantasy track set and, for the chosen scene,
+  required to contain a phase keyword (town, journey, explore, or battle). Phase
+  matching is whole-word, so `inn` no longer false-matches `beginning` and Town
+  returns only town sounds.
+
 ## Reliability bug hunt — August 2026
 
 - A full phased audit fixed thirteen additional defects across encounter state,

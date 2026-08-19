@@ -381,8 +381,20 @@ def load_catalog(
         raise RuntimeError(f"Tabletop Audio catalog unavailable: {exc}") from exc
 
 
-def rank_tracks(tracks: Iterable[TabletopAudioTrack], query: str, limit: int = 10) -> tuple[TabletopAudioTrack, ...]:
-    """Rank local metadata deterministically; an empty query returns no matches."""
+def rank_tracks(
+    tracks: Iterable[TabletopAudioTrack],
+    query: str,
+    limit: int = 10,
+    *,
+    require_categories: Sequence[str] = (),
+    require_terms: Sequence[str] = (),
+    boost_terms: Sequence[str] = (),
+) -> tuple[TabletopAudioTrack, ...]:
+    """Rank local metadata deterministically; an empty query returns no matches.
+
+    Pass ``require_categories``/``require_terms`` to keep results inside a genre or
+    scene phase, and ``boost_terms`` to bias the ranking toward that phase.
+    """
     if (
         not isinstance(query, str)
         or not query.strip()
@@ -400,8 +412,21 @@ def rank_tracks(tracks: Iterable[TabletopAudioTrack], query: str, limit: int = 1
     )
     if not terms:
         return ()
+    if isinstance(require_categories, (str, bytes)):
+        raise ValueError("Required categories must be a sequence")
+    required = {category.casefold() for category in require_categories}
+    require_set = tuple(term.casefold() for term in require_terms)
+    boost_set = tuple(term.casefold() for term in boost_terms)
     scored: list[tuple[int, str, str, TabletopAudioTrack]] = []
     for track in tracks:
+        if required:
+            track_categories = {category.casefold() for category in track.categories}
+            if not track_categories.intersection(required):
+                continue
+        haystack = " ".join((track.title, track.audio_type, track.description, *track.categories)).casefold()
+        if require_set:
+            if not any(_word_boundary(term, haystack) for term in require_set):
+                continue
         title = {word.casefold() for word in _WORD_RE.findall(track.title)}
         categories = {word.casefold() for category in track.categories for word in _WORD_RE.findall(category)}
         kind = {word.casefold() for word in _WORD_RE.findall(track.audio_type)}
@@ -413,10 +438,20 @@ def rank_tracks(tracks: Iterable[TabletopAudioTrack], query: str, limit: int = 1
             + (10 if term in description else 0)
             for term in terms
         )
+        if boost_set:
+            if any(_word_boundary(term, haystack) for term in boost_set):
+                score += 1000
         if score:
             scored.append((score, track.title.casefold(), track.slug.casefold(), track))
     scored.sort(key=lambda item: (-item[0], item[1], item[2]))
     return tuple(item[3] for item in scored[:limit])
+
+
+def _word_boundary(term: str, haystack: str) -> bool:
+    """True when ``term`` appears as a whole word inside ``haystack``.
+
+    Avoids substring false-positives (e.g. "inn" inside "beginning")."""
+    return bool(re.search(rf"(?<![A-Za-z0-9]){re.escape(term)}(?![A-Za-z0-9])", haystack))
 
 
 search_tracks = rank_tracks

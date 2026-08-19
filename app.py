@@ -1258,10 +1258,37 @@ class BattleApp(App[None]):
         ("battle", "Battle", "Combat and dangerous confrontation"),
     )
 
+    # Keep every suggestion inside the fantasy track set, then bias the ranking
+    # toward the chosen scene so (e.g.) Town never drifts into generic results.
+    _TABLETOP_PHASE_FILTERS = {
+        "town": (
+            ("fantasy",),
+            ("town", "village", "city", "hamlet", "market", "bazaar", "inn",
+             "tavern", "street", "shop", "festival", "fair", "keep", "castle",
+             "docks", "square", "plaza", "emporium", "shoppe"),
+        ),
+        "journey": (
+            ("fantasy",),
+            ("road", "travel", "journey", "wagon", "horse", "path", "trail",
+             "caravan", "ship", "sail", "desert", "mountain", "river", "wind",
+             "storm", "march"),
+        ),
+        "explore": (
+            ("fantasy",),
+            ("ruins", "cave", "cavern", "dungeon", "forest", "jungle", "swamp",
+             "temple", "tomb", "wreck", "crypt", "abyss", "ancient"),
+        ),
+        "battle": (
+            ("fantasy",),
+            ("battle", "fight", "war", "combat", "siege", "raid", "duel",
+             "clash", "ambush", "attack", "warzone", "monster"),
+        ),
+    }
+
     async def _tabletop_audio_phase_menu(self) -> str | None:
         """Let the DM pick which scene phase to source music for."""
         options = [
-            (key, folio_choice("PHASE", label, hint))
+            (key, f"[bold #e6ebf2]{escape(label)}[/]\n          [#7d8794]{escape(hint)}[/]")
             for key, label, hint in self._TABLETOP_PHASES
         ]
         options.append(("back", "[#717b89]Back to music[/]"))
@@ -1316,22 +1343,49 @@ class BattleApp(App[None]):
             if phase is None:
                 return True
             context = self._music_encounter_context(phase=phase)
+            searching = GeneratingModal(
+                "Searching Tabletop Audio…",
+                f"Finding {phase} tracks for your encounter — one moment.",
+            )
+
+            def _cancel_search() -> None:
+                loading.cancelled = True
+                searching.dismiss(None)
+
+            searching.action_cancel = _cancel_search
+            self.push_screen(searching)
             ai_terms: tuple[str, ...] = ()
             ai_categories: tuple[str, ...] = ()
             try:
                 ai_terms, ai_categories = await run_in_thread(
                     openai_client.music_search_terms, context, categories, phase=phase
                 )
+            except asyncio.CancelledError:
+                self._dismiss_music_modal_if_current(searching)
+                raise
             except Exception:
                 if loading.cancelled:
                     return False
                 self._log("Music AI helper unavailable; using local encounter search.", kind="info")
+            finally:
+                self._dismiss_music_modal_if_current(searching)
             if loading.cancelled:
+                self._log("Tabletop Audio search cancelled.", kind="select")
                 return False
             detail = ""
             while True:
                 query = " ".join(part for part in (context, detail, *ai_terms, *ai_categories) if part).strip()
-                tracks = tabletop_audio.rank_tracks(catalog.tracks, query, limit=5)
+                require_categories, phase_terms = self._TABLETOP_PHASE_FILTERS.get(
+                    phase, (("fantasy",), ())
+                )
+                tracks = tabletop_audio.rank_tracks(
+                    catalog.tracks,
+                    query,
+                    limit=5,
+                    require_categories=require_categories,
+                    require_terms=phase_terms,
+                    boost_terms=phase_terms,
+                )
                 options: list[tuple[str, str]] = []
                 for track in tracks:
                     description = " ".join(track.description.split())
@@ -1341,11 +1395,8 @@ class BattleApp(App[None]):
                     options.append(
                         (
                             f"tta:{track.slug}",
-                            folio_choice(
-                                "PLAY",
-                                escape(track.title),
-                                f"{escape(track.audio_type)} · {escape(description)} · {escape(category_text)}",
-                            ),
+                            f"[bold #d2aa5a]{escape(track.title)}[/]\n          "
+                            f"[#7d8794]{escape(track.audio_type)} · {escape(description)} · {escape(category_text)}[/]",
                         )
                     )
                 if not tracks:

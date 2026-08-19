@@ -19,12 +19,12 @@ def _response(content):
     return {"choices": [{"message": {"content": json.dumps(content)}}]}
 
 
-def _track(slug="crypt", title="Crypt Tension", categories=("Dungeon",)):
+def _track(slug="crypt", title="Crypt Tension", categories=("Dungeon", "fantasy")):
     return tabletop_audio.TabletopAudioTrack(
         slug=slug,
         title=title,
         audio_type="Music",
-        description="Ominous stone corridors and distant bells.",
+        description="Ominous stone corridors and distant combat bells.",
         categories=categories,
     )
 
@@ -147,7 +147,7 @@ def test_music_ai_failure_falls_back_to_local_catalog_search():
     catalog = tabletop_audio.CatalogLoad((_track(),), "fresh-cache")
     queries = []
 
-    def rank(_tracks, query, limit=5):
+    def rank(_tracks, query, limit=5, **_kwargs):
         queries.append(query)
         return ()
 
@@ -190,7 +190,7 @@ def test_tabletop_audio_expands_ai_once_before_local_refines_and_no_results():
         calls.append("ai")
         return (("ominous",), ("Dungeon",))
 
-    def rank(_tracks, query, limit=5):
+    def rank(_tracks, query, limit=5, **_kwargs):
         ranks.append(query)
         return ()
 
