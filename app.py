@@ -1269,9 +1269,8 @@ class BattleApp(App[None]):
         ),
         "journey": (
             ("fantasy",),
-            ("road", "travel", "journey", "wagon", "horse", "path", "trail",
-             "caravan", "ship", "sail", "desert", "mountain", "river", "wind",
-             "storm", "march"),
+            ("road", "travel", "journey", "wagon", "horse", "carriage", "path",
+             "trail", "caravan", "ship", "sail", "march"),
         ),
         "explore": (
             ("fantasy",),

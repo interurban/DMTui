@@ -439,8 +439,13 @@ def rank_tracks(
             for term in terms
         )
         if boost_set:
-            if any(_word_boundary(term, haystack) for term in boost_set):
-                score += 1000
+            title_haystack = track.title.casefold()
+            rest_haystack = " ".join((track.audio_type, track.description, *track.categories)).casefold()
+            for term in boost_set:
+                if _word_boundary(term, title_haystack):
+                    score += 5000
+                elif _word_boundary(term, rest_haystack):
+                    score += 1000
         if score:
             scored.append((score, track.title.casefold(), track.slug.casefold(), track))
     scored.sort(key=lambda item: (-item[0], item[1], item[2]))
