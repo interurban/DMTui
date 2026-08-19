@@ -1376,7 +1376,8 @@ class BattleApp(App[None]):
             while True:
                 query = " ".join(part for part in (context, detail, *ai_terms, *ai_categories) if part).strip()
                 require_categories, phase_terms = self._TABLETOP_PHASE_FILTERS.get(
-                    phase, (("fantasy",), ())
+                    phase.casefold() if isinstance(phase, str) else phase,
+                    (("fantasy",), ()),
                 )
                 tracks = tabletop_audio.rank_tracks(
                     catalog.tracks,
