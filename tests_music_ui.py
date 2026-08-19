@@ -143,7 +143,7 @@ def _inline(fn, *args, **kwargs):
 
 
 def test_music_ai_failure_falls_back_to_local_catalog_search():
-    app = _FlowApp(["back"])
+    app = _FlowApp(["battle", "back"])
     catalog = tabletop_audio.CatalogLoad((_track(),), "fresh-cache")
     queries = []
 
@@ -159,11 +159,12 @@ def test_music_ai_failure_falls_back_to_local_catalog_search():
     assert queries and "Ghoul" in queries[0]
     assert any("AI helper unavailable" in message for message, _kind in app.logs)
     menus = [screen for screen in app.screens if isinstance(screen, ListModal)]
-    assert menus and any(key == "none" for key, _label in menus[0]._options)
+    suggestions = [menu for menu in menus if "ENCOUNTER SUGGESTIONS" in menu._title]
+    assert suggestions and any(key == "none" for key, _label in suggestions[0]._options)
 
 
 def test_music_no_results_can_refine_without_playing():
-    app = _FlowApp(["refine", "foggy bridge", "back"])
+    app = _FlowApp(["battle", "refine", "foggy bridge", "back"])
     catalog = tabletop_audio.CatalogLoad((_track(),), "network")
     with mock.patch.object(appmod, "run_in_thread", _inline), \
          mock.patch.object(tabletop_audio, "load_catalog", return_value=catalog), \
@@ -171,20 +172,21 @@ def test_music_no_results_can_refine_without_playing():
          mock.patch.object(tabletop_audio, "rank_tracks", return_value=()):
         asyncio.run(app._tabletop_audio_flow())
     menus = [screen for screen in app.screens if isinstance(screen, ListModal)]
-    assert len(menus) == 2
-    assert "TABLETOP AUDIO" in menus[0]._title and "CC BY-NC-ND 4.0" in menus[0]._title
-    assert any(key == "refine" for key, _label in menus[0]._options)
+    suggestions = [menu for menu in menus if "ENCOUNTER SUGGESTIONS" in menu._title]
+    assert len(suggestions) == 2
+    assert "TABLETOP AUDIO" in suggestions[0]._title and "CC BY-NC-ND 4.0" in suggestions[0]._title
+    assert any(key == "refine" for key, _label in suggestions[0]._options)
     assert any(isinstance(screen, TextModal) for screen in app.screens)
     assert not app.played
 
 
 def test_tabletop_audio_expands_ai_once_before_local_refines_and_no_results():
-    app = _FlowApp(["refine", "foggy bridge", "none", "back"])
+    app = _FlowApp(["battle", "refine", "foggy bridge", "none", "back"])
     catalog = tabletop_audio.CatalogLoad((_track(),), "network")
     calls = []
     ranks = []
 
-    def helper(*_args):
+    def helper(*_args, **_kwargs):
         calls.append("ai")
         return (("ominous",), ("Dungeon",))
 
@@ -206,11 +208,11 @@ def test_tabletop_audio_escape_while_loading_never_opens_or_reopens_menus():
     catalog = tabletop_audio.CatalogLoad((_track(),), "fresh-cache")
 
     async def exercise(phase):
-        app = _FlowApp(["suggest-tabletop"])
+        app = _FlowApp(["suggest-tabletop", "battle"])
         started = asyncio.Event()
         release = asyncio.Event()
 
-        async def delayed(fn, *args):
+        async def delayed(fn, *args, **kwargs):
             if (phase == "catalog" and fn is tabletop_audio.load_catalog) or (
                 phase == "ai" and fn is openai_client.music_search_terms
             ):
@@ -220,7 +222,7 @@ def test_tabletop_audio_escape_while_loading_never_opens_or_reopens_menus():
                 return catalog
             if fn is openai_client.music_search_terms:
                 return (), ()
-            return fn(*args)
+            return fn(*args, **kwargs)
 
         with mock.patch.object(appmod, "run_in_thread", delayed):
             task = asyncio.create_task(app._music_flow())
@@ -231,8 +233,8 @@ def test_tabletop_audio_escape_while_loading_never_opens_or_reopens_menus():
             release.set()
             await task
         menus = [screen for screen in app.screens if isinstance(screen, ListModal)]
-        assert len(menus) == 1 and menus[0]._title.startswith("MUSIC ·")
-        assert not any(menu._title.startswith("TABLETOP AUDIO ·") for menu in menus)
+        assert menus[0]._title.startswith("MUSIC ·")
+        assert not any("ENCOUNTER SUGGESTIONS" in menu._title for menu in menus)
 
     asyncio.run(exercise("catalog"))
     asyncio.run(exercise("ai"))
@@ -290,7 +292,7 @@ def test_invalid_config_still_offers_online_tabletop_audio_and_playback_failure_
     assert any(key == "suggest-tabletop" for key, _label in menu._options)
     assert any("bad config" in message for message, _kind in app.logs)
 
-    app = _FlowApp(["suggest-tabletop", "tta:crypt", "back"])
+    app = _FlowApp(["suggest-tabletop", "battle", "tta:crypt", "back"])
     catalog = tabletop_audio.CatalogLoad((_track(),), "fresh-cache")
     app._play_music_source = lambda *_args, **_kwargs: False
     with mock.patch.object(appmod, "run_in_thread", _inline), \
@@ -298,7 +300,10 @@ def test_invalid_config_still_offers_online_tabletop_audio_and_playback_failure_
          mock.patch.object(openai_client, "music_search_terms", return_value=((), ())):
         asyncio.run(app._music_flow())
     menus = [screen for screen in app.screens if isinstance(screen, ListModal)]
-    assert [menu._title.startswith("MUSIC ·") for menu in menus] == [True, False, True]
+    assert menus[0]._title.startswith("MUSIC ·")
+    assert any(menu._title.startswith("TABLETOP AUDIO · CHOOSE") for menu in menus)
+    assert any("ENCOUNTER SUGGESTIONS" in menu._title for menu in menus)
+    assert menus[-1]._title.startswith("MUSIC ·")
 
 
 def test_tabletop_audio_back_reopens_music_controls_for_results_and_no_results():
@@ -323,7 +328,7 @@ def test_tabletop_audio_back_reopens_music_controls_for_results_and_no_results()
 
 
 def test_confirmed_catalog_track_streams_derived_looped_url_with_attribution():
-    app = _FlowApp(["tta:crypt"])
+    app = _FlowApp(["battle", "tta:crypt"])
     track = _track()
     catalog = tabletop_audio.CatalogLoad((track,), "stale-cache")
 
@@ -340,7 +345,7 @@ def test_confirmed_catalog_track_streams_derived_looped_url_with_attribution():
     assert source.loop is True and source.url == track.playback_url
     assert source.referrer == tabletop_audio.CATALOG_URL
     assert attribution == "Tabletop Audio · CC BY-NC-ND 4.0"
-    menu = next(screen for screen in app.screens if isinstance(screen, ListModal))
+    menu = next(screen for screen in app.screens if isinstance(screen, ListModal) and "ENCOUNTER SUGGESTIONS" in screen._title)
     assert "TABLETOP AUDIO" in menu._title and "CC BY-NC-ND 4.0" in menu._title
     selected_label = next(label for key, label in menu._options if key == "tta:crypt")
     assert "\n" in selected_label and "Music" in selected_label

@@ -1186,7 +1186,7 @@ class BattleApp(App[None]):
         state = "Paused" if self._music.paused else "Playing"
         return f"{state} · {source.name}"
 
-    def _music_encounter_context(self) -> str:
+    def _music_encounter_context(self, phase: str = "combat") -> str:
         """Describe only public encounter state relevant to a soundtrack search."""
         private_names = {c.name.strip() for c in self.combatants if c.kind == "PC" and c.name.strip()}
         saved_party: list[dict] = []
@@ -1223,7 +1223,7 @@ class BattleApp(App[None]):
         if opponents:
             details.append(f"Opponents: {opponents}")
         if details:
-            details.append(f"Round {self.round}; phase: combat")
+            details.append(f"Round {self.round}; phase: {phase}")
             return ". ".join(details) + "."
         return "Fantasy tabletop encounter: tense adventure, exploration, or combat."
 
@@ -1251,6 +1251,35 @@ class BattleApp(App[None]):
         self._sync_music_status()
         return True
 
+    _TABLETOP_PHASES = (
+        ("town", "Town", "Settlements, markets, and quiet civilization"),
+        ("journey", "Journey / Road", "Travel and movement between places"),
+        ("explore", "Explore / Ambient", "Wilderness, ruins, and careful investigation"),
+        ("battle", "Battle", "Combat and dangerous confrontation"),
+    )
+
+    async def _tabletop_audio_phase_menu(self) -> str | None:
+        """Let the DM pick which scene phase to source music for."""
+        options = [
+            (key, folio_choice("PHASE", label, hint))
+            for key, label, hint in self._TABLETOP_PHASES
+        ]
+        options.append(("back", "[#717b89]Back to music[/]"))
+        menu = ListModal(
+            "TABLETOP AUDIO · CHOOSE A SCENE",
+            options,
+            wide=True,
+            compact=True,
+        )
+        try:
+            picked = await self.push_screen(menu, wait_for_dismiss=True)
+        except asyncio.CancelledError:
+            self._dismiss_music_modal_if_current(menu)
+            raise
+        if not picked or picked == "back":
+            return None
+        return picked
+
     async def _tabletop_audio_flow(self) -> bool:
         """Load/rank public metadata; return whether to reopen music controls."""
         if _offline_mode():
@@ -1262,20 +1291,10 @@ class BattleApp(App[None]):
             catalog = await run_in_thread(tabletop_audio.load_catalog, TABLETOP_AUDIO_CACHE_PATH)
             if loading.cancelled:
                 return False
-            context = self._music_encounter_context()
-            categories = tuple(sorted({category for track in catalog.tracks for category in track.categories}, key=str.casefold))
-            ai_terms: tuple[str, ...] = ()
-            ai_categories: tuple[str, ...] = ()
-            try:
-                ai_terms, ai_categories = await run_in_thread(
-                    openai_client.music_search_terms, context, categories
-                )
-            except Exception:
-                if loading.cancelled:
-                    return False
-                self._log("Music AI helper unavailable; using local encounter search.", kind="info")
-            if loading.cancelled:
-                return False
+            categories = tuple(sorted(
+                {category for track in catalog.tracks for category in track.categories},
+                key=str.casefold,
+            ))
         except Exception as exc:
             if loading.cancelled:
                 return False
@@ -1292,75 +1311,92 @@ class BattleApp(App[None]):
         if catalog.status == "stale-cache":
             self._log("Tabletop Audio catalog refresh failed; using stale metadata.", kind="warn")
 
-        detail = ""
         while True:
-            query = " ".join(part for part in (context, detail, *ai_terms, *ai_categories) if part).strip()
-            tracks = tabletop_audio.rank_tracks(catalog.tracks, query, limit=5)
-            options: list[tuple[str, str]] = []
-            for track in tracks:
-                description = " ".join(track.description.split())
-                if len(description) > 100:
-                    description = description[:97].rstrip() + "…"
-                category_text = ", ".join(track.categories) or "Uncategorized"
-                options.append(
-                    (
-                        f"tta:{track.slug}",
-                        folio_choice(
-                            "PLAY",
-                            escape(track.title),
-                            f"{escape(track.audio_type)} · {escape(description)} · {escape(category_text)}",
-                        ),
-                    )
-                )
-            if not tracks:
-                options.append(("none", "[#7d8794]No matching public tracks yet.[/]"))
-            options.extend([
-                ("refine", folio_choice("REFINE", "Search mood or keywords", "Required for a narrower local match")),
-                ("back", "[#717b89]Back to music[/]"),
-            ])
-            results = ListModal(
-                "TABLETOP AUDIO · ENCOUNTER SUGGESTIONS · CC BY-NC-ND 4.0",
-                options,
-                wide=True,
-                compact=True,
-            )
-            try:
-                picked = await self.push_screen(results, wait_for_dismiss=True)
-            except asyncio.CancelledError:
-                self._dismiss_music_modal_if_current(results)
-                raise
-            if picked == "refine":
-                refine = TextModal("REFINE TABLETOP AUDIO", "required: ominous rain, chase, candlelit ruins", confirm="Search")
-                try:
-                    detail = await self.push_screen(refine, wait_for_dismiss=True) or ""
-                except asyncio.CancelledError:
-                    self._dismiss_music_modal_if_current(refine)
-                    raise
-                if not detail:
-                    continue
-                continue
-            if picked == "none":
-                continue
-            if not picked or picked == "back":
+            phase = await self._tabletop_audio_phase_menu()
+            if phase is None:
                 return True
-            if picked.startswith("tta:"):
-                slug = picked.removeprefix("tta:")
-                track = next((item for item in tracks if item.slug == slug), None)
-                if track is None:
-                    self._log("That Tabletop Audio selection is no longer available.", kind="warn")
-                    return True
-                if not self._play_music_source(
-                    music.MusicSource(
-                        track.title,
-                        track.playback_url,
-                        note="Tabletop Audio",
-                        loop=True,
-                        referrer=tabletop_audio.CATALOG_URL,
-                    ),
-                    attribution="Tabletop Audio · CC BY-NC-ND 4.0",
-                ):
-                    return True
+            context = self._music_encounter_context(phase=phase)
+            ai_terms: tuple[str, ...] = ()
+            ai_categories: tuple[str, ...] = ()
+            try:
+                ai_terms, ai_categories = await run_in_thread(
+                    openai_client.music_search_terms, context, categories, phase=phase
+                )
+            except Exception:
+                if loading.cancelled:
+                    return False
+                self._log("Music AI helper unavailable; using local encounter search.", kind="info")
+            if loading.cancelled:
                 return False
+            detail = ""
+            while True:
+                query = " ".join(part for part in (context, detail, *ai_terms, *ai_categories) if part).strip()
+                tracks = tabletop_audio.rank_tracks(catalog.tracks, query, limit=5)
+                options: list[tuple[str, str]] = []
+                for track in tracks:
+                    description = " ".join(track.description.split())
+                    if len(description) > 100:
+                        description = description[:97].rstrip() + "…"
+                    category_text = ", ".join(track.categories) or "Uncategorized"
+                    options.append(
+                        (
+                            f"tta:{track.slug}",
+                            folio_choice(
+                                "PLAY",
+                                escape(track.title),
+                                f"{escape(track.audio_type)} · {escape(description)} · {escape(category_text)}",
+                            ),
+                        )
+                    )
+                if not tracks:
+                    options.append(("none", "[#7d8794]No matching public tracks yet.[/]"))
+                options.extend([
+                    ("refine", folio_choice("REFINE", "Search mood or keywords", "Required for a narrower local match")),
+                    ("back", "[#717b89]Back to scenes[/]"),
+                ])
+                results = ListModal(
+                    "TABLETOP AUDIO · ENCOUNTER SUGGESTIONS · CC BY-NC-ND 4.0",
+                    options,
+                    wide=True,
+                    compact=True,
+                )
+                try:
+                    picked = await self.push_screen(results, wait_for_dismiss=True)
+                except asyncio.CancelledError:
+                    self._dismiss_music_modal_if_current(results)
+                    raise
+                if picked == "refine":
+                    refine = TextModal("REFINE TABLETOP AUDIO", "required: ominous rain, chase, candlelit ruins", confirm="Search")
+                    try:
+                        detail = await self.push_screen(refine, wait_for_dismiss=True) or ""
+                    except asyncio.CancelledError:
+                        self._dismiss_music_modal_if_current(refine)
+                        raise
+                    if not detail:
+                        continue
+                    continue
+                if picked == "none":
+                    continue
+                if not picked or picked == "back":
+                    break
+                if picked.startswith("tta:"):
+                    slug = picked.removeprefix("tta:")
+                    track = next((item for item in tracks if item.slug == slug), None)
+                    if track is None:
+                        self._log("That Tabletop Audio selection is no longer available.", kind="warn")
+                        return True
+                    if not self._play_music_source(
+                        music.MusicSource(
+                            track.title,
+                            track.playback_url,
+                            note="Tabletop Audio",
+                            loop=True,
+                            referrer=tabletop_audio.CATALOG_URL,
+                        ),
+                        attribution="Tabletop Audio · CC BY-NC-ND 4.0",
+                    ):
+                        return True
+                    return False
 
     async def _music_flow(self) -> None:
         config: music.MusicConfig | None = None
@@ -1433,7 +1469,8 @@ class BattleApp(App[None]):
                 self._sync_music_status()
                 return
             if picked == "suggest-tabletop":
-                if await self._tabletop_audio_flow():
+                res = await self._tabletop_audio_flow()
+                if res:
                     continue
                 return
             if picked and picked.startswith("play:") and config is not None:

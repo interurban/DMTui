@@ -129,6 +129,7 @@ def music_search_terms(
     encounter_context: str,
     available_categories: list[str] | tuple[str, ...],
     *,
+    phase: str = "",
     config: dict | None = None,
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
     """Expand an encounter into safe local-catalog search vocabulary.
@@ -150,6 +151,9 @@ def music_search_terms(
     )
     if len(categories) > 80:
         categories = categories[:80]
+    if not isinstance(phase, str):
+        raise ValueError("Phase must be a string")
+    phase = " ".join(phase.split())
 
     config, api_key, model, options = _client_settings(config)
     category_items: dict = {"type": "string"}
@@ -190,6 +194,7 @@ def music_search_terms(
                 "role": "system",
                 "content": (
                     "Return only search vocabulary for a local Tabletop Audio catalog. "
+                    "Target the supplied scene phase when choosing mood and setting words. "
                     "Do not name tracks, URLs, artists, download ids, or playback instructions. "
                     "Use concise mood, setting, and action words. Categories must exactly match the supplied list."
                 ),
@@ -198,7 +203,8 @@ def music_search_terms(
                 "role": "user",
                 "content": (
                     f"Encounter context:\n{encounter_context.strip()}\n\n"
-                    f"Allowed categories (exact spelling only):\n{', '.join(categories) or '(none)'}"
+                    + (f"Scene phase: {phase}\n\n" if phase else "")
+                    + f"Allowed categories (exact spelling only):\n{', '.join(categories) or '(none)'}"
                 ),
             },
         ],
