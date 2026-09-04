@@ -5,7 +5,7 @@ volatile encounter state, keeps campaign continuity, and retrieves quick
 references without trying to simulate the game. The DM's rulings and physical
 table remain authoritative.
 
-![Ward encounter screen](shots/01-start.png)
+![Ward](dm-tui-logo.png)
 
 Built with [Textual](https://textual.textualize.io/).
 
@@ -14,6 +14,14 @@ Built with [Textual](https://textual.textualize.io/).
 ```sh
 python -m venv .venv
 .venv/bin/pip install -e .
+ward
+```
+
+Install directly from Git instead:
+
+```sh
+python -m venv .venv
+.venv/bin/pip install git+https://github.com/interurban/DMTui.git
 ward
 ```
 
@@ -287,7 +295,11 @@ library so attack and confirmation remain reliable.
 
 ## Layout
 
-- `app.py` — the `BattleApp` TUI: bindings, flows, rendering, CSS.
+Ward keeps its code as importable top-level modules (so `.venv/bin/python app.py`
+works straight from a checkout) and ships thin `ward`/`dmtui` console-script
+packages that delegate to them. `app.py` is the `BattleApp` TUI (bindings,
+flows, rendering, CSS). `pyproject.toml` lists both the packages and the
+top-level `py-modules` that ship with them. The rest:
 - `battle.py` — data model (`Combatant`), dice engine, attack resolution,
   monster library, the starting encounter.
 - `campaigns.py` — campaign, party roster, lookup preference, and notes persistence.

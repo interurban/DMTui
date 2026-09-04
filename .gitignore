@@ -1,6 +1,7 @@
 .venv/
 __pycache__/
 shots/
+.pytest_cache/
 encounter.json
 encounter.json.tmp
 encounters.json
