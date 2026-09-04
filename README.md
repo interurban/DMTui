@@ -5,7 +5,7 @@ volatile encounter state, keeps campaign continuity, and retrieves quick
 references without trying to simulate the game. The DM's rulings and physical
 table remain authoritative.
 
-![Ward](dm-tui-logo.png?v=2)
+![Ward](ward-logo.png)
 
 Built with [Textual](https://textual.textualize.io/).
 
