@@ -29,7 +29,10 @@ Ward is organized around three moments rather than a growing feature catalog:
   preserves the data it replaces.
 - **Complete: table ambience.** Optional soundtrack controls use a replaceable
   stream catalog and a narrow external-player boundary rather than binding Ward
-  to a music service.
+  to a music service. When online, encounter-aware **Tabletop Audio** scene
+  suggestions (Town / Journey / Explore / Battle) rank the public catalog
+  locally or with a private helper, then stream free 10-minute tracks directly
+  to the same external player.
 - **Next: real-session observation.** Use Ward at several physical tables and
   record which actions interrupt play, which shortcuts are remembered, and
   which screens go unused. Simplify from evidence before adding automation.

@@ -46,6 +46,45 @@ Sprint log for Ward — a private, table-side tool for D&D Dungeon Masters
   entry). The redundant Find flow was removed, and `/` is labeled honestly as
   Ask AI. `Ctrl+M` remains unavailable because terminals encode it as Enter.
 
+## Tabletop Audio catalog, privacy, and phase relevance
+
+- **Cached public catalog.** Tabletop Audio's free 10-minute track metadata is
+  fetched once and cached for 24 hours at `.cache/tabletop_audio/catalog.json`,
+  so suggestions work across sessions with a single network hit; a failed
+  refresh falls back to stale-but-valid metadata instead of dropping the
+  feature.
+- **Rejected corrupt caches.** A malformed, empty, or mistyped cache entry is
+  validated and re-fetched instead of crashing suggestions, and track playback
+  URLs are always derived from the validated download id rather than any URL
+  text planted in the cache.
+- **Preserved metadata, clean flavor.** Cached entries round-trip their exact
+  descriptions and categories, and paid "alternate versions … for Patreon"
+  notices (including the adventure-PDF suffix) are stripped from track flavor
+  on both network parse and cache read.
+- **Safe, precise streaming.** Playback URLs are built only from validated
+  alphanumeric download ids against the fixed sounds host, loop by default, and
+  are sent to `mpv`/`ffplay` with the catalog as referrer so public MP3s stream
+  correctly. Ward still never downloads or caches audio.
+- **Private, cancellable suggestions.** The AI context carries the encounter
+  name, non-PC foes, and round only; party names are removed even from saved
+  roster copies. Search runs behind a cancellable progress popup, and a missing
+  or failed helper falls back to local encounter ranking instead of failing the
+  screen.
+- **Packaged soundtrack AI setup.** `ward/llm_config.json` ships a working
+  default so the optional suggestion helper is reliable from a fresh install,
+  and the provider module is part of both the install package and the test gate
+  (`python tests.py` now also runs the music and Tabletop Audio provider
+  suites).
+- **Scene-phase suggestions.** A fixed **Town / Journey / Explore / Battle**
+  picker targets the AI search vocabulary at the chosen phase; results stay
+  inside the fantasy genre and can be refined with extra mood/keyword text
+  before playing.
+- **Phase-relevance ranking.** Phase keywords matched in a track title score far
+  above description-only hits so thematically central tracks rank first; the
+  journey set matches travel-specific terms (road, travel, wagon, caravan,
+  ship, …) rather than generic setting words, and phase lookup tolerates
+  key-case mismatches.
+
 ## Tabletop Audio scene suggestions
 
 - The choose-a-scene menu dropped the redundant `PHASE` tag; each scene now reads

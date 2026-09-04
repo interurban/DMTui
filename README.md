@@ -143,20 +143,23 @@ The starter station is SomaFM's permanent external-player playlist for
 [Drone Zone](https://somafm.com/dronezone/directstreamlinks.html), offered for
 individual personal listening.
 
-When online, **Suggest Tabletop Audio** offers up to five encounter-aware picks
+When online, **Suggest Tabletop Audio** first asks which scene phase is running —
+Town, Journey, Explore, or Battle — then offers up to five encounter-aware picks
 from Tabletop Audio's entirely free public, downloadable 10-minute tracks. Ward
-uses the current encounter name, non-PC foes and round (never party names), then
-ranks the public metadata locally. If the existing optional OpenAI setup is
-available it can expand only mood/setting vocabulary and exact catalog
-categories; an unavailable or failed helper simply falls back to local encounter
-terms. SoundPads and Patreon content are excluded. Selecting a result streams
-its public MP3 directly to `mpv`/`ffplay` and loops it; Ward never downloads or
-caches audio. Catalog metadata is cached for 24 hours at
-`.cache/tabletop_audio/catalog.json`, with a brief stale-cache fallback if a
-refresh fails. Results visibly credit **Tabletop Audio · CC BY-NC-ND 4.0**.
-Configured streams remain available alongside these suggestions. `WARD_OFFLINE=1`
-keeps any active playback controls but disables catalog/API fetching and cannot
-play cached Tabletop Audio audio.
+uses the current encounter name, non-PC foes, round, and chosen phase (never
+party names), ranks the public metadata locally, and keeps every result inside
+the fantasy genre with a whole-word phase keyword, so Town returns only town
+sounds. If the existing optional OpenAI setup is available it can expand only
+mood/setting vocabulary and exact catalog categories; an unavailable or failed
+helper simply falls back to local encounter terms. Results can be refined with
+an extra mood or keyword search before playing. SoundPads and Patreon content
+are excluded. Selecting a result streams its public MP3 directly to
+`mpv`/`ffplay` and loops it; Ward never downloads or caches audio. Catalog
+metadata is cached for 24 hours at `.cache/tabletop_audio/catalog.json`, with a
+brief stale-cache fallback if a refresh fails. Results visibly credit
+**Tabletop Audio · CC BY-NC-ND 4.0**. Configured streams remain available
+alongside these suggestions. `WARD_OFFLINE=1` keeps any active playback controls
+but disables catalog/API fetching and cannot play cached Tabletop Audio audio.
 
 ### DM Screen mode
 

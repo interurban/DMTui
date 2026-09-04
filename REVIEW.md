@@ -46,7 +46,26 @@ The full-code pass added coverage for seven more cases:
 
 These fixes remain at shared logic, persistence, and external-service
 boundaries so UI flows and future callers receive the same behavior. The unit
-suite now exercises 107 cases.
+suite now exercises 107 battle/core cases, and the music and Tabletop Audio
+provider suites bring the combined `python tests.py` gate to 133.
+
+### Tabletop Audio provider audit — August 2026
+
+The public-catalog module (`tabletop_audio.py`) and its music-flow integration
+were reviewed as a fresh external-data boundary. Reproduced defects and their
+resolutions:
+
+| Area | Reproduced defect and resolution |
+| --- | --- |
+| Availability | One failed fetch dropped suggestions for the whole session; a valid 24-hour cache serves `fresh-cache`, and a failing refresh falls back to `stale-cache` metadata instead of raising. |
+| Cache integrity | A malformed, empty, or mistyped cache entry crashed or emptied suggestions; entries are validated (timestamp shape, track list, field types) and re-fetched, and playing URLs are always derived from the validated slug, ignoring any `url` text planted in the cache. |
+| Playback address | Scraped card text could be combined into an unsafe playback path; URLs are built only from `[A-Za-z0-9_]+` download ids against the fixed sounds host, loop by default, and go to `mpv`/`ffplay` with the catalog as referrer. |
+| Flavor text | Paid "alternate versions … for Patreon" notices (including the adventure-PDF suffix) leaked into suggestion rows; promotion suffixes are stripped on both network parse and cache read. |
+| Privacy | Party names could reach the AI helper through saved roster copies; encounter context strips PC names from both the live table and the persisted roster. |
+| Cancellation | Cancelling a background search could dismiss a second, still-current modal during worker cleanup; only the still-current music modal is dismissed, and cancelled searches return cleanly to the music controls. |
+| Phase filter | Key-case mismatches or substring matches (`inn` inside `beginning`) could widen or drop scene results; phase lookup is case-insensitive and require/boost terms match whole words. |
+| Ranking | Description-only phase hits could outrank the tracks a scene is named for; title matches are weighted far above body matches, and the journey set uses travel-specific terms instead of generic setting words. |
+| Packaging | The provider module was missing from the install package and the test gate; it ships in `py-modules`/package-data and `python tests.py` now also runs the `tests_music_ui` and `tests_tabletop_audio` suites. |
 
 ## Cleanup pass — August 2026
 
@@ -67,7 +86,7 @@ the shipped product.
 | `modals.py` | Consolidated repeated monster/spell search, selection, fetch, and list-rebuild behavior in `_SearchLibrary`; failed fetches now remain visible instead of being silently swallowed. Folio choice formatting moved here from `app.py`. |
 | `persistence.py` | Added one tested atomic JSON writer that preserves the previous file and removes its temporary file when serialization fails. |
 | `srd.py` | Made cache writes use the same atomic persistence path as user-owned data. |
-| `tests.py` | Added behavioral coverage for failed atomic writes; the cleanup pass brought the suite to 80 unit cases, earlier bug hunts expanded it to 93, and the phased full-code audit brought it to 107. |
+| `tests.py` | Added behavioral coverage for failed atomic writes; the cleanup pass brought the suite to 80 unit cases, earlier bug hunts expanded it to 93, and the phased full-code audit brought it to 107. The music and Tabletop Audio provider suites bring the combined gate to 133. |
 | `ward_backup.py` | Removed two more copies of atomic JSON-write and cleanup code. |
 | `pyproject.toml` | Ships the new persistence module. |
 
